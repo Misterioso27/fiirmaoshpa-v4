@@ -189,7 +189,6 @@ export default function Loans() {
       const plazoOriginal = parseFloat(form.term_months)
       const tipoFormulario = (form.type || 'personal').toLowerCase()
       
-      // Intentar buscar el producto de manera dinámica si existiera catálogo
       let productoEncontrado = products.find(p => (p.type || '').toLowerCase() === tipoFormulario)
       if (!productoEncontrado) {
         productoEncontrado = products.find(p => 
@@ -198,15 +197,13 @@ export default function Loans() {
         )
       }
 
-      // ASIGNACIÓN DE FALLBACK AUTOMÁTICA COHERENTE CON TUS REGISTROS DE BASE DE DATOS
       const finalProductId = form.product_id || (
         productoEncontrado ? productoEncontrado.id : (
           products.length > 0 ? products[0].id : (
-            // Si la tabla local está vacía, forzar los IDs estructurales nativos mapeados por tipo
             tipoFormulario === 'commercial' ? '24a2fdd3-1a29-4907-9122-6c9e71b57ffb' :
             tipoFormulario === 'business'   ? 'a3d66d25-47ed-4cdc-849e-62f835d664d4' :
             tipoFormulario === 'vehicle'    ? '156beb17-b2d6-41fd-a122-9f10bfd04f9a' :
-            '3047c3ee-889d-4964-8cb6-660bf285b85d' // Fallback Personal (Corto Plazo)
+            '3047c3ee-889d-4964-8cb6-660bf285b85d'
           )
         )
       )
@@ -271,4 +268,254 @@ export default function Loans() {
             <option value="">Todos los estados</option>
             {tab === 'applications'
               ? ['draft','submitted','in_review','approved','rejected','cancelled'].map(s => <option key={s} value={s}>{s}</option>)
-              : ['active','overdue','defaulted','paid','written_off'].
+              : ['active','overdue','defaulted','paid','written_off'].map(s => <option key={s} value={s}>{s}</option>)
+            }
+          </select>
+        </div>
+
+        <div className="table-wrapper">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Código</th><th>Cliente</th><th>Monto</th>
+                <th>Plazo</th><th>Propósito</th><th>Estado</th><th>Fecha</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={7} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
+              ) : items.length === 0 ? (
+                <tr><td colSpan={7}>
+                  <Empty icon={CreditCard} title="Sin registros" desc="Registra la primera solicitud de préstamo" />
+                </td></tr>
+              ) : items.map(item => {
+                let plazoVisual = item.term_months;
+                const freq = item.ai_analysis?.frequency;
+                const periods = item.ai_analysis?.total_periods;
+                
+                if (item.term_months === 3 && ((freq === 'weekly' && periods === 10) || (freq === 'biweekly' && periods === 5))) {
+                  plazoVisual = 2.5;
+                }
+
+                return (
+                  <tr key={item.id}>
+                    <td className="font-mono text-xs font-semibold text-hpa-700">
+                      {item.application_code || item.loan_code}
+                    </td>
+                    <td>
+                      <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
+                      <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
+                    </td>
+                    <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
+                    <td>{plazoVisual} meses</td>
+                    <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
+                    <td><StatusBadge status={item.status} /></td>
+                    <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <Pagination page={page} pages={pagination.pages} total={pagination.total} limit={20} onChange={setPage} />
+      </div>
+
+      {/* ─── MODAL SOLICITUD ─────────────────────────────────────── */}
+      <Modal open={showModal} onClose={() => setShowModal(false)}
+        title="Nueva Solicitud de Préstamo" size="xl"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={save}
+              disabled={saving || !!analisis.error}>
+              {saving ? <Spinner size={14} /> : 'Registrar Solicitud'}
+            </button>
+          </>
+        }>
+
+        {analisis.error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex gap-2 items-start rounded-lg">
+            <ShieldAlert size={16} className="flex-shrink-0 mt-0.5" /> {analisis.error}
+          </div>
+        )}
+        {analisis.warning && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold flex gap-2 items-start rounded-lg">
+            <ShieldAlert size={16} className="flex-shrink-0 mt-0.5" /> {analisis.warning}
+          </div>
+        )}
+
+        <div className="space-y-5">
+          {/* DATOS DEL SOLICITANTE */}
+          <div>
+            <p className="form-section-title">Datos del Solicitante</p>
+            <div className="form-row">
+              <Field label="Cliente" required>
+                <select className="select" value={form.client_id||''} onChange={e=>fc('client_id',e.target.value)}>
+                  <option value="">Seleccionar cliente...</option>
+                  {clients.map(c => (
+                    <option key={c.id} value={c.id}>{c.first_name} {c.last_name} — {c.client_code}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Tipo de Préstamo" required>
+                <select className="select" value={form.type||'personal'} onChange={e=>fc('type',e.target.value)}>
+                  <option value="personal">Personal (Corto Plazo)</option>
+                  <option value="commercial">Comercial (Corto Plazo)</option>
+                  <option value="business">Préstamo Emprende</option>
+                  <option value="vehicle">Vehículo</option>
+                  <option value="mortgage">Terreno / Propiedad</option>
+                </select>
+              </Field>
+            </div>
+
+            <div className="mt-3">
+              <Field label="Documento de Identificación (Cédula / Pasaporte)" required>
+                <div className="flex gap-3 items-center">
+                  <label className="btn btn-ghost btn-sm border border-dashed border-hpa-slate-3 cursor-pointer">
+                    <Upload size={13} className="inline mr-1" />
+                    {uploading ? 'Subiendo...' : idDocUrl ? 'Cambiar documento' : 'Subir Cédula / Pasaporte'}
+                    <input type="file" className="hidden" accept="image/*,.pdf"
+                      onChange={e => uploadIdDoc(e.target.files[0])} disabled={uploading} />
+                  </label>
+                  {idDocUrl && (
+                    <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                      <CheckCircle2 size={12} /> Documento cargado ✓
+                    </span>
+                  )}
+                </div>
+              </Field>
+            </div>
+          </div>
+
+          {/* CONDICIONES */}
+          <div>
+            <p className="form-section-title">Condiciones del Préstamo</p>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Monto Solicitado (RD$)" required>
+                <input className="input" type="number" placeholder="0.00"
+                  value={form.amount_requested||''} onChange={e=>fc('amount_requested',e.target.value)} />
+              </Field>
+              <Field label="Tasa Mensual (%)" required>
+                <input className="input" type="number" step="0.1" placeholder="3"
+                  value={form.rate_monthly||''} onChange={e=>fc('rate_monthly',e.target.value)} />
+              </Field>
+              <Field label="Frecuencia de Pago" required>
+                <select className="select" value={form.frequency||'monthly'} onChange={e=>fc('frequency',e.target.value)}>
+                  <option value="weekly">Semanal</option>
+                  <option value="biweekly">Quincenal</option>
+                  <option value="monthly">Mensual</option>
+                </select>
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Plazo" required>
+                <select className="select" value={form.term_months||3} onChange={e=>fc('term_months',parseFloat(e.target.value))}>
+                  <option value={2.5}>2.5 Meses {form.frequency === 'weekly' ? '(10 cuotas)' : form.frequency === 'biweekly' ? '(5 cuotas)' : ''}</option>
+                  <option value={3}>3 Meses {form.frequency === 'weekly' ? '(12 cuotas)' : form.frequency === 'biweekly' ? '(6 cuotas)' : '(3 cuotas)'}</option>
+                </select>
+              </Field>
+              <Field label="Ingreso Mensual Comprobable (RD$)" required>
+                <input className="input" type="number" placeholder="0.00"
+                  value={form.monthly_income||''} onChange={e=>fc('monthly_income',e.target.value)} />
+              </Field>
+            </div>
+
+            <div className="mt-3">
+              <Field label="Propósito del préstamo" required>
+                <input className="input" placeholder="Ej: Capital de trabajo, Compra de mercancía..."
+                  value={form.purpose||''} onChange={e=>fc('purpose',e.target.value)} />
+              </Field>
+            </div>
+          </div>
+
+          {/* SIMULADOR REDUCTIVO DE CUOTAS */}
+          {analisis.cuotas.length > 0 && (
+            <div className="bg-hpa-slate-1 rounded-xl p-4 border border-hpa-slate-3 space-y-3">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Calculator size={14} className="text-hpa-700" />
+                  <p className="text-xs font-bold text-hpa-slate-7">
+                    Simulador de Cobros — {tipoLabel[form.frequency]} · {analisis.cuotas.length} cuotas
+                  </p>
+                </div>
+                <button type="button" className="text-xs text-hpa-700 font-semibold underline"
+                  onClick={() => setShowSchedule(!showSchedule)}>
+                  {showSchedule ? 'Ocultar' : `Ver desglose`}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2 text-center bg-white p-3 rounded-lg border border-hpa-slate-2 text-xs">
+                <div>
+                  <p className="text-hpa-slate-5">Cuota {tipoLabel[form.frequency]}</p>
+                  <p className="font-bold text-hpa-700 font-numeric">RD$ {analisis.montoCuota.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                </div>
+                <div>
+                  <p className="text-hpa-slate-5">Cuotas Pendientes</p>
+                  <p className="font-bold text-hpa-700">{analisis.cuotas.length - cuotasPagadas} / {analisis.cuotas.length}</p>
+                </div>
+                <div>
+                  <p className="text-hpa-slate-5">Total Cobrado</p>
+                  <p className="font-bold text-emerald-600">RD$ {totalCobrado.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                </div>
+                <div>
+                  <p className="text-hpa-slate-5">Balance Pendiente</p>
+                  <p className="font-bold text-amber-600">RD$ {balancePendiente.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                </div>
+              </div>
+
+              {showSchedule && (
+                <div className="max-h-52 overflow-y-auto bg-white rounded-lg border border-hpa-slate-2">
+                  <table className="table text-[11px] w-full">
+                    <thead>
+                      <tr>
+                        <th>Período</th>
+                        <th>Monto Cuota</th>
+                        <th>Balance Restante</th>
+                        <th>Estado</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analisis.cuotas.map((c, i) => (
+                        <tr key={c.num} className={c.pagado ? 'bg-emerald-50/60' : ''}>
+                          <td className="font-medium">{c.label}</td>
+                          <td className="font-semibold font-numeric">
+                            RD$ {c.monto.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="text-hpa-slate-5 font-numeric">
+                            RD$ {c.saldoRestante.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${c.pagado ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                              {c.pagado ? 'PAGADO' : 'PENDIENTE'}
+                            </span>
+                          </td>
+                          <td>
+                            <button type="button" onClick={() => alternarCuota(i)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold text-white ${c.pagado ? 'bg-hpa-slate-4' : 'bg-emerald-600'}`}>
+                              {c.pagado ? 'Revertir' : 'Cobrar'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* NOTAS */}
+          <div>
+            <Field label="Notas del Analista">
+              <textarea className="input h-16 resize-none"
+                placeholder="Observaciones, condiciones especiales, garantías..."
+                value={form.analyst_notes||''} onChange={e=>fc('analyst_notes',e.target.value)} />
+            </Field>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  )
+}
