@@ -182,7 +182,7 @@ export default function Loans() {
       const plazoOriginal = parseFloat(form.term_months)
       const tipoPrestamo = (form.type || '').toLowerCase()
       
-      // Clasificación exacta según las opciones del select del formulario
+      // Clasificación exacta vinculada estrictamente al value asignado en las etiquetas <option> del JSX
       const esPersonal  = tipoPrestamo === 'personal'
       const esComercial = tipoPrestamo === 'commercial'
       const esBusiness  = tipoPrestamo === 'business'
@@ -190,13 +190,13 @@ export default function Loans() {
 
       await db.createLoanApplication({
         client_id:        form.client_id,
-        // Mapeo estricto verificado con tu tabla para evitar violaciones de clave foránea
+        // Enlace de IDs verificado para evitar violaciones de llave foránea (FK)
         product_id: form.product_id || (
-          esPersonal  ? '3047c3ee-889d-4964-8cb6-660bf285b85d' : // Personal
-          esComercial ? '24a2fdd3-1a29-4907-9122-6c9e71b57ffb' : // Comercial
-          esBusiness  ? 'a3d66d25-47ed-4cdc-849e-62f835d664d4' : // Emprende
+          esPersonal  ? '3047c3ee-889d-4964-8cb6-660bf285b85d' : // Personal (Corto Plazo)
+          esComercial ? '24a2fdd3-1a29-4907-9122-6c9e71b57ffb' : // Comercial (Corto Plazo)
+          esBusiness  ? 'a3d66d25-47ed-4cdc-849e-62f835d664d4' : // Préstamo Emprende
           esVehiculo  ? '156beb17-b2d6-41fd-a122-9f10bfd04f9a' : // Vehículo
-          '3047c3ee-889d-4964-8cb6-660bf285b85d'                 // Por defecto Personal
+          '3047c3ee-889d-4964-8cb6-660bf285b85d'                 // Fallback seguro a Personal
         ),
         type:              form.type || 'personal',
         amount_requested: parseFloat(form.amount_requested),
