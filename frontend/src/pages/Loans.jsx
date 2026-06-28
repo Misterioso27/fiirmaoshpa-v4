@@ -157,7 +157,7 @@ export default function Loans() {
       const { error: err } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
       if (err) throw err
       const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path)
-      setIdDocUrl(urlData.publicUrl)
+      idDocUrl(urlData.publicUrl)
       fc('id_doc_url', urlData.publicUrl)
     } catch {
       alert('Error al subir documento. Verifica que el bucket "documents" existe en Supabase Storage.')
@@ -186,10 +186,15 @@ export default function Loans() {
 
       await db.createLoanApplication({
         client_id:        form.client_id,
-        product_id:       form.product_id || null,
-        type:             form.type || 'personal',
+        product_id: form.product_id || (
+          form.type === 'personal' ? '3047c3ee-889d-4964-8cb6-660bf285b85d' :
+          form.type === 'commercial' ? 'a3d66d25-47ed-4cdc-849e-62f835d664d' :
+          form.type === 'business' ? '24a2fdd3-1a29-4907-9122-6c9e71b57ffb' :
+          form.type === 'vehicle' ? '156beb17-b2d6-41fd-a122-9f10bfd04f9a' : '3047c3ee-889d-4964-8cb6-660bf285b85d'
+        ),
+        type:              form.type || 'personal',
         amount_requested: parseFloat(form.amount_requested),
-        currency:         form.currency || 'DOP',
+        currency:          form.currency || 'DOP',
         // PUENTE INTELIGENTE DE IDA: Si es 2.5, se guarda como 3 para satisfacer la restricción del entero de Supabase
         term_months:      plazoOriginal === 2.5 ? 3 : plazoOriginal,
         purpose:          form.purpose,
