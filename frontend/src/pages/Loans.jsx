@@ -154,9 +154,9 @@ export default function Loans() {
     try {
       const ext = file.name.split('.').pop()
       const path = `loan-docs/${companyId}/${Date.now()}.${ext}`
-      const { error: err } = await supabase.storage.from('Documents').upload(path, file, { upsert: true })
+      const { error: err } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
       if (err) throw err
-      const { data: urlData } = supabase.storage.from('Documents').getPublicUrl(path)
+      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path)
       setIdDocUrl(urlData.publicUrl)
       fc('id_doc_url', urlData.publicUrl)
     } catch {
