@@ -82,6 +82,7 @@ export default function Loans() {
   const [form, setForm]         = useState({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
   const [saving, setSaving]     = useState(false)
   const [clients, setClients]   = useState([])
+  const [products, setProducts] = useState([]) // Almacén dinámico de productos reales de Supabase
   const [analisis, setAnalisis] = useState({ cuotas: [], error: '', warning: '', montoCuota: 0 })
   const [showSchedule, setShowSchedule] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -123,6 +124,7 @@ export default function Loans() {
     setShowSchedule(false)
     setShowModal(true)
     try {
+      // 1. Cargar clientes activos
       const { data: cls } = await supabase
         .from('clients')
         .select('id, first_name, last_name, client_code')
@@ -130,6 +132,13 @@ export default function Loans() {
         .eq('status', 'active')
         .limit(100)
       setClients(cls || [])
+
+      // 2. CARGA DINÁMICA DE PRODUCTOS: Trae los IDs reales de Supabase para evitar errores de FK
+      const { data: prods } = await supabase
+        .from('loan_products')
+        .select('id, name, type')
+        .eq('company_id', companyId)
+      setProducts(prods || [])
     } catch {}
   }
 
@@ -180,24 +189,29 @@ export default function Loans() {
       }
 
       const plazoOriginal = parseFloat(form.term_months)
-      const tipoPrestamo = (form.type || '').toLowerCase()
+      const tipoFormulario = (form.type || 'personal').toLowerCase()
       
-      // Clasificación exacta vinculada estrictamente al value asignado en las etiquetas <option> del JSX
-      const esPersonal  = tipoPrestamo === 'personal'
-      const esComercial = tipoPrestamo === 'commercial'
-      const esBusiness  = tipoPrestamo === 'business'
-      const esVehiculo  = tipoPrestamo === 'vehicle'
+      // BUSQUEDA INTELIGENTE DEL PRODUCTO: Busca en los cargados de la BD el que coincida en tipo
+      let productoEncontrado = products.find(p => (p.type || '').toLowerCase() === tipoFormulario)
+      
+      // Si no encuentra coincidencia exacta, busca por aproximación de texto
+      if (!productoEncontrado) {
+        productoEncontrado = products.find(p => 
+          (p.type || '').toLowerCase().includes(tipoFormulario) || 
+          (p.name || '').toLowerCase().includes(tipoFormulario)
+        )
+      }
+
+      // Si todo lo anterior falla, tomamos el primer producto disponible de la lista como salvavidas
+      const finalProductId = form.product_id || (productoEncontrado ? productoEncontrado.id : products[0]?.id)
+
+      if (!finalProductId) {
+        throw new Error('No se encontró un ID de producto válido en tu catálogo de Supabase. Crea un producto de préstamo primero.')
+      }
 
       await db.createLoanApplication({
         client_id:        form.client_id,
-        // Enlace de IDs verificado para evitar violaciones de llave foránea (FK)
-        product_id: form.product_id || (
-          esPersonal  ? '3047c3ee-889d-4964-8cb6-660bf285b85d' : // Personal (Corto Plazo)
-          esComercial ? '24a2fdd3-1a29-4907-9122-6c9e71b57ffb' : // Comercial (Corto Plazo)
-          esBusiness  ? 'a3d66d25-47ed-4cdc-849e-62f835d664d4' : // Préstamo Emprende
-          esVehiculo  ? '156beb17-b2d6-41fd-a122-9f10bfd04f9a' : // Vehículo
-          '3047c3ee-889d-4964-8cb6-660bf285b85d'                 // Fallback seguro a Personal
-        ),
+        product_id:       finalProductId, // Asignación dinámica 100% libre de errores de clave foránea
         type:              form.type || 'personal',
         amount_requested: parseFloat(form.amount_requested),
         currency:          form.currency || 'DOP',
