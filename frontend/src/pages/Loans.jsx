@@ -145,7 +145,7 @@ export default function Loans() {
 
   // Totales reductivos en tiempo real
   const cuotasPagadas    = analisis.cuotas.filter(c => c.pagado).length
-  const totalCobrado     = analisis.cuotas.filter(c => c.pagado).reduce((a, c) => a + c.monto, 0)
+  const totalCobrado      = analisis.cuotas.filter(c => c.pagado).reduce((a, c) => a + c.monto, 0)
   const balancePendiente = analisis.cuotas.filter(c => !c.pagado).reduce((a, c) => a + c.monto, 0)
 
   async function uploadIdDoc(file) {
@@ -182,6 +182,7 @@ export default function Loans() {
       }
 
       const estadoInicial = analisis.warning ? 'in_review' : 'submitted'
+      const plazoOriginal = parseFloat(form.term_months)
 
       await db.createLoanApplication({
         client_id:        form.client_id,
@@ -189,7 +190,8 @@ export default function Loans() {
         type:             form.type || 'personal',
         amount_requested: parseFloat(form.amount_requested),
         currency:         form.currency || 'DOP',
-        term_months:      parseFloat(form.term_months),
+        // PUENTE INTELIGENTE DE IDA: Si es 2.5, se guarda como 3 para satisfacer la restricción del entero de Supabase
+        term_months:      plazoOriginal === 2.5 ? 3 : plazoOriginal,
         purpose:          form.purpose,
         monthly_income:   parseFloat(form.monthly_income),
         analyst_notes:    analisis.warning
@@ -198,11 +200,13 @@ export default function Loans() {
         ai_analysis: {
           frequency:         form.frequency,
           rate_monthly:      parseFloat(form.rate_monthly),
-          total_periods:     analisis.cuotas.length,
+          total_periods:      analisis.cuotas.length,
           cuota_individual:  analisis.montoCuota,
-          total_interes:     analisis.cuotas.reduce((a, c) => a + c.monto, 0) - parseFloat(form.amount_requested),
+          total_interes:      analisis.cuotas.reduce((a, c) => a + c.monto, 0) - parseFloat(form.amount_requested),
           id_doc_url:        idDocUrl || null,
-          requiere_autorizacion: !!analisis.warning
+          requiere_autorizacion: !!analisis.warning,
+          // Guardamos el plazo real en los metadatos para auditorías internas de la plataforma
+          real_term_months:  plazoOriginal 
         }
       }, companyId, branchId, user.id)
 
@@ -262,22 +266,33 @@ export default function Loans() {
                 <tr><td colSpan={7}>
                   <Empty icon={CreditCard} title="Sin registros" desc="Registra la primera solicitud de préstamo" />
                 </td></tr>
-              ) : items.map(item => (
-                <tr key={item.id}>
-                  <td className="font-mono text-xs font-semibold text-hpa-700">
-                    {item.application_code || item.loan_code}
-                  </td>
-                  <td>
-                    <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
-                    <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
-                  </td>
-                  <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
-                  <td>{item.term_months} meses</td>
-                  <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
-                  <td><StatusBadge status={item.status} /></td>
-                  <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
-                </tr>
-              ))}
+              ) : items.map(item => {
+                // PUENTE INTELIGENTE DE VUELTA: Si lee 3 de Supabase pero viene de un plan con estructura de 10 o 5 cuotas, le muestra al cliente sus 2.5 reales
+                let plazoVisual = item.term_months;
+                const freq = item.ai_analysis?.frequency;
+                const periods = item.ai_analysis?.total_periods;
+                
+                if (item.term_months === 3 && ((freq === 'weekly' && periods === 10) || (freq === 'biweekly' && periods === 5))) {
+                  plazoVisual = 2.5;
+                }
+
+                return (
+                  <tr key={item.id}>
+                    <td className="font-mono text-xs font-semibold text-hpa-700">
+                      {item.application_code || item.loan_code}
+                    </td>
+                    <td>
+                      <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
+                      <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
+                    </td>
+                    <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
+                    <td>{plazoVisual} meses</td>
+                    <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
+                    <td><StatusBadge status={item.status} /></td>
+                    <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
