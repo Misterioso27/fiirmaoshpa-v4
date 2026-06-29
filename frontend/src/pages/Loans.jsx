@@ -201,13 +201,13 @@ function Loans() {
           mortgage: 'Terreno / Propiedad'
         }
         
+        // Eliminado por completo el campo 'status' para evitar choques con el esquema
         const { data: nuevoProd, error: prodErr } = await supabase
           .from('financial_products')
           .insert([{
             company_id: companyId,
             name: nombresMapeados[tipoFormulario] || 'Préstamo General',
-            type: tipoFormulario,
-            status: 'active'
+            type: tipoFormulario
           }])
           .select('id')
           .single()
