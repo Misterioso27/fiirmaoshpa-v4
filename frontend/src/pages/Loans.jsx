@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, CreditCard, Calculator, Upload, ShieldAlert, CheckCircle2 } from 'lucide-react'
 import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
@@ -13,7 +12,6 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
   const rm = parseFloat(tasaMensual) / 100
   const tiempo = parseFloat(meses)
 
-  // Mapeo estricto según Excel: Frecuencia × Tiempo
   let totalCuotas = 0
   let etiqueta = 'Cuota'
   if (frecuencia === 'weekly') {
@@ -27,12 +25,10 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
     etiqueta = 'Mes'
   }
 
-  // Interés simple directo (Calculadora General del Excel)
   const totalInteres = p * rm
   const totalPagar = p + totalInteres
   const montoCuota = Math.round((totalPagar / totalCuotas) * 100) / 100
 
-  // Regla del 30% con formatos específicos del sistema (, para miles, . para decimales)
   let errorMsg = '', warningMsg = ''
   if (ingresoNeto && parseFloat(ingresoNeto) > 0) {
     const ingreso = parseFloat(ingresoNeto)
@@ -51,7 +47,6 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
     }
   }
 
-  // Generar tabla de cuotas reductiva
   const listado = []
   let saldo = totalPagar
   for (let i = 1; i <= totalCuotas; i++) {
@@ -68,7 +63,7 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
   return { cuotas: listado, error: errorMsg, warning: warningMsg, montoCuota }
 }
 
-export default function Loans() {
+function Loans() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id
   const branchId  = user?.branch?.id
@@ -89,7 +84,6 @@ export default function Loans() {
   const [uploading, setUploading] = useState(false)
   const [idDocUrl, setIdDocUrl] = useState('')
 
-  // Calculadora en tiempo real
   useEffect(() => {
     setAnalisis(calcularEstructura({
       monto: form.amount_requested,
@@ -133,8 +127,9 @@ export default function Loans() {
         .limit(100)
       setClients(cls || [])
 
+      // Mapeo directo sobre tu tabla real verificada: financial_products
       const { data: prods } = await supabase
-        .from('loan_products')
+        .from('financial_products')
         .select('id, name, type')
         .eq('company_id', companyId)
       setProducts(prods || [])
@@ -188,7 +183,6 @@ export default function Loans() {
       const plazoOriginal = parseFloat(form.term_months)
       const tipoFormulario = (form.type || 'personal').toLowerCase()
       
-      // 1. Intentar buscar correspondencia en los productos existentes en la BD
       let productoEncontrado = products.find(p => (p.type || '').toLowerCase() === tipoFormulario)
       if (!productoEncontrado) {
         productoEncontrado = products.find(p => 
@@ -199,21 +193,21 @@ export default function Loans() {
 
       let finalProductId = form.product_id || (productoEncontrado ? productoEncontrado.id : products[0]?.id)
 
-      // 2. CREACIÓN AUTÓNOMA (Estrategia Anti-FK Error): Si no hay producto, lo insertamos en caliente
+      // Si no existe el producto, lo inserta autónomamente en la tabla correcta: financial_products
       if (!finalProductId) {
         const nombresMapeados = {
-          personal: 'Crédito Personal (Corto Plazo)',
-          commercial: 'Crédito Comercial',
+          personal: 'Préstamo Personal',
+          commercial: 'Préstamo Comercial',
           business: 'Préstamo Emprende',
-          vehicle: 'Financiamiento de Vehículo',
-          mortgage: 'Garantía Inmobiliaria'
+          vehicle: 'Préstamo Vehículo',
+          mortgage: 'Terreno / Propiedad'
         }
         
         const { data: nuevoProd, error: prodErr } = await supabase
-          .from('loan_products')
+          .from('financial_products')
           .insert([{
             company_id: companyId,
-            name: nombresMapeados[tipoFormulario] || 'Crédito General',
+            name: nombresMapeados[tipoFormulario] || 'Préstamo General',
             type: tipoFormulario,
             status: 'active',
             min_amount: 1000,
@@ -224,11 +218,10 @@ export default function Loans() {
           .select('id')
           .single()
 
-        if (prodErr) throw new Error(`Error estructural al autogenerar el producto: ${prodErr.message}`)
+        if (prodErr) throw new Error(`Error estructural al autogenerar el producto financiero: ${prodErr.message}`)
         finalProductId = nuevoProd.id
       }
 
-      // 3. Insertar la solicitud de préstamo garantizando que el ID del producto es 100% válido
       await db.createLoanApplication({
         client_id:        form.client_id,
         product_id:       finalProductId, 
@@ -366,7 +359,6 @@ export default function Loans() {
         )}
 
         <div className="space-y-5">
-          {/* DATOS DEL SOLICITANTE */}
           <div>
             <p className="form-section-title">Datos del Solicitante</p>
             <div className="form-row">
@@ -408,7 +400,6 @@ export default function Loans() {
             </div>
           </div>
 
-          {/* CONDICIONES */}
           <div>
             <p className="form-section-title">Condiciones del Préstamo</p>
             <div className="grid grid-cols-3 gap-3">
@@ -450,7 +441,6 @@ export default function Loans() {
             </div>
           </div>
 
-          {/* SIMULADOR REDUCTIVO DE CUOTAS */}
           {analisis.cuotas.length > 0 && (
             <div className="bg-hpa-slate-1 rounded-xl p-4 border border-hpa-slate-3 space-y-3">
               <div className="flex justify-between items-center">
@@ -527,7 +517,6 @@ export default function Loans() {
             </div>
           )}
 
-          {/* NOTAS */}
           <div>
             <Field label="Notas del Analista">
               <textarea className="input h-16 resize-none"
@@ -540,3 +529,5 @@ export default function Loans() {
     </div>
   )
 }
+
+export default Loans;
