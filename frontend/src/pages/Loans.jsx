@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, CreditCard, Calculator, Upload, ShieldAlert, CheckCircle2 } from 'lucide-react'
 import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
@@ -142,7 +143,6 @@ export default function Loans() {
 
   function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
-  // Alternar estado de pago de cuota (lógica reductiva)
   function alternarCuota(index) {
     setAnalisis(prev => ({
       ...prev,
@@ -150,7 +150,6 @@ export default function Loans() {
     }))
   }
 
-  // Totales reductivos en tiempo real
   const cuotasPagadas    = analisis.cuotas.filter(c => c.pagado).length
   const totalCobrado      = analisis.cuotas.filter(c => c.pagado).reduce((a, c) => a + c.monto, 0)
   const balancePendiente = analisis.cuotas.filter(c => !c.pagado).reduce((a, c) => a + c.monto, 0)
@@ -189,6 +188,7 @@ export default function Loans() {
       const plazoOriginal = parseFloat(form.term_months)
       const tipoFormulario = (form.type || 'personal').toLowerCase()
       
+      // 1. Intentar buscar correspondencia en los productos existentes en la BD
       let productoEncontrado = products.find(p => (p.type || '').toLowerCase() === tipoFormulario)
       if (!productoEncontrado) {
         productoEncontrado = products.find(p => 
@@ -197,17 +197,38 @@ export default function Loans() {
         )
       }
 
-      const finalProductId = form.product_id || (
-        productoEncontrado ? productoEncontrado.id : (
-          products.length > 0 ? products[0].id : (
-            tipoFormulario === 'commercial' ? '24a2fdd3-1a29-4907-9122-6c9e71b57ffb' :
-            tipoFormulario === 'business'   ? 'a3d66d25-47ed-4cdc-849e-62f835d664d4' :
-            tipoFormulario === 'vehicle'    ? '156beb17-b2d6-41fd-a122-9f10bfd04f9a' :
-            '3047c3ee-889d-4964-8cb6-660bf285b85d'
-          )
-        )
-      )
+      let finalProductId = form.product_id || (productoEncontrado ? productoEncontrado.id : products[0]?.id)
 
+      // 2. CREACIÓN AUTÓNOMA (Estrategia Anti-FK Error): Si no hay producto, lo insertamos en caliente
+      if (!finalProductId) {
+        const nombresMapeados = {
+          personal: 'Crédito Personal (Corto Plazo)',
+          commercial: 'Crédito Comercial',
+          business: 'Préstamo Emprende',
+          vehicle: 'Financiamiento de Vehículo',
+          mortgage: 'Garantía Inmobiliaria'
+        }
+        
+        const { data: nuevoProd, error: prodErr } = await supabase
+          .from('loan_products')
+          .insert([{
+            company_id: companyId,
+            name: nombresMapeados[tipoFormulario] || 'Crédito General',
+            type: tipoFormulario,
+            status: 'active',
+            min_amount: 1000,
+            max_amount: 5000000,
+            min_rate: 1,
+            max_rate: 100
+          }])
+          .select('id')
+          .single()
+
+        if (prodErr) throw new Error(`Error estructural al autogenerar el producto: ${prodErr.message}`)
+        finalProductId = nuevoProd.id
+      }
+
+      // 3. Insertar la solicitud de préstamo garantizando que el ID del producto es 100% válido
       await db.createLoanApplication({
         client_id:        form.client_id,
         product_id:       finalProductId, 
