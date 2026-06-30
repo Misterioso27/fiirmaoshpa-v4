@@ -22,15 +22,11 @@ function Cash() {
   const loadRegisters = useCallback(async () => {
     try {
       let query = supabase.from('cash_registers').select('*')
-      if (branchId) {
-        query = query.eq('branch_id', branchId)
-      }
+      if (branchId) query = query.eq('branch_id', branchId)
       const { data, error } = await query
       if (error) throw error
       setRegisters(data || [])
-      if (data?.length > 0) {
-        setSelectedRegister(data[0].id)
-      }
+      if (data?.length > 0) setSelectedRegister(data[0].id)
     } catch (err) {
       console.error('Error cargando cajas:', err.message)
     }
@@ -74,9 +70,7 @@ function Cash() {
 
   useEffect(() => {
     loadRegisters()
-    if (user?.id) {
-      checkActiveSession()
-    }
+    if (user?.id) checkActiveSession()
   }, [user?.id, loadRegisters, checkActiveSession])
 
   const handleOpenSession = async (e) => {
@@ -185,4 +179,78 @@ function Cash() {
             </Field>
 
             <button type="submit" className="btn btn-primary w-full flex items-center justify-center gap-2" disabled={submitting}>
-              {submitting ? <Spinner size={14} /> :
+              {submitting ? <Spinner size={14} /> : <><Unlock size={14} /> Inicializar Sesión de Caja</>}
+            </button>
+          </form>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <div className="lg:col-span-4 space-y-4">
+            <div className="card p-5 bg-hpa-slate-9 text-white border-0 space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-white/60 uppercase">Estatus de Sesión</p>
+                <h3 className="text-base font-bold mt-0.5">Sesión Abierta por el Usuario</h3>
+              </div>
+              <hr className="border-white/10" />
+              <div>
+                <p className="text-[11px] text-white/60 uppercase">Fondo de Apertura</p>
+                <p className="text-sm font-medium font-numeric">{fmt(activeSession.opening_balance)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-emerald-400 font-bold uppercase">Efectivo Disponible</p>
+                <p className="text-2xl font-black font-numeric text-emerald-400">{fmt(activeSession.current_balance)}</p>
+              </div>
+              <button onClick={handleCloseSession} className="btn bg-red-600 hover:bg-red-700 text-white border-0 w-full text-xs font-bold py-2 flex items-center justify-center gap-1.5" disabled={submitting}>
+                {submitting ? <Spinner size={12} /> : <><Lock size={12} /> Realizar Cierre Diario</>}
+              </button>
+            </div>
+          </div>
+
+          <div className="lg:col-span-8">
+            <div className="card p-0">
+              <div className="p-4 border-b border-hpa-slate-2 flex justify-between items-center">
+                <p className="text-xs font-bold text-hpa-slate-7 uppercase">Historial de Caja</p>
+                <button onClick={() => loadMovements(activeSession.id)} className="btn btn-ghost p-2" disabled={loadingMovements}>
+                  <RefreshCw size={14} className={loadingMovements ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              <div className="table-wrapper max-h-[450px] overflow-y-auto">
+                <table className="table text-xs">
+                  <thead>
+                    <tr>
+                      <th>Hora</th>
+                      <th>Tipo</th>
+                      <th>Concepto</th>
+                      <th className="text-right">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movements.length === 0 ? (
+                      <tr><td colSpan={4} className="py-12"><Empty icon={ClipboardList} title="Sin movimientos" desc="No hay transacciones todavía." /></td></tr>
+                    ) : movements.map(mov => (
+                      <tr key={mov.id}>
+                        <td className="text-hpa-slate-4">{fmtDate(mov.created_at)}</td>
+                        <td>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${mov.type === 'income' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                            {mov.type === 'income' ? 'ENTRADA' : 'SALIDA'}
+                          </span>
+                        </td>
+                        <td className="font-medium text-hpa-slate-8">{mov.description}</td>
+                        <td className={`text-right font-bold font-numeric ${mov.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {mov.type === 'income' ? '+' : '-'}{fmt(mov.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default Cash
