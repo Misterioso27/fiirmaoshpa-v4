@@ -4,6 +4,49 @@ import { supabase, fmt, fmtDate } from '@/lib/supabase'
 import { Field, Spinner, Empty } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
+// 1. COMPONENTE AUXILIAR PARA LA TABLA DE MOVIMIENTOS
+function MovementsTable({ movements }) {
+  if (movements.length === 0) {
+    return (
+      <div className="py-12">
+        <Empty icon={ClipboardList} title="Sin movimientos" desc="No hay transacciones todavía." />
+      </div>
+    )
+  }
+
+  return (
+    <div className="table-wrapper max-h-[450px] overflow-y-auto">
+      <table className="table text-xs">
+        <thead>
+          <tr>
+            <th>Hora</th>
+            <th>Tipo</th>
+            <th>Concepto</th>
+            <th className="text-right">Monto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {movements.map(mov => (
+            <tr key={mov.id}>
+              <td className="text-hpa-slate-4">{fmtDate(mov.created_at)}</td>
+              <td>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${mov.type === 'income' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                  {mov.type === 'income' ? 'ENTRADA' : 'SALIDA'}
+                </span>
+              </td>
+              <td className="font-medium text-hpa-slate-8">{mov.description}</td>
+              <td className={`text-right font-bold font-numeric ${mov.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+                {mov.type === 'income' ? '+' : '-'}{fmt(mov.amount)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// 2. COMPONENTE PRINCIPAL
 function Cash() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id
@@ -14,7 +57,6 @@ function Cash() {
   const [activeSession, setActiveSession] = useState(null)
   const [movements, setMovements] = useState([])
   const [loadingMovements, setLoadingMovements] = useState(false)
-
   const [openingBalance, setOpeningBalance] = useState('')
   const [selectedRegister, setSelectedRegister] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -22,15 +64,11 @@ function Cash() {
   const loadRegisters = useCallback(async () => {
     try {
       let query = supabase.from('cash_registers').select('*')
-      if (branchId) {
-        query = query.eq('branch_id', branchId)
-      }
+      if (branchId) query = query.eq('branch_id', branchId)
       const { data, error } = await query
       if (error) throw error
       setRegisters(data || [])
-      if (data?.length > 0) {
-        setSelectedRegister(data[0].id)
-      }
+      if (data?.length > 0) setSelectedRegister(data[0].id)
     } catch (err) {
       console.error('Error cargando cajas:', err.message)
     }
@@ -46,7 +84,6 @@ function Cash() {
         .eq('user_id', user.id)
         .eq('status', 'open')
         .maybeSingle()
-
       if (error) throw error
       setActiveSession(data)
       if (data) loadMovements(data.id)
@@ -74,9 +111,7 @@ function Cash() {
 
   useEffect(() => {
     loadRegisters()
-    if (user?.id) {
-      checkActiveSession()
-    }
+    if (user?.id) checkActiveSession()
   }, [user?.id, loadRegisters, checkActiveSession])
 
   const handleOpenSession = async (e) => {
@@ -86,7 +121,6 @@ function Cash() {
       alert('Por favor ingrese un monto de apertura válido.')
       return
     }
-
     setSubmitting(true)
     try {
       const { data, error } = await supabase
@@ -100,19 +134,13 @@ function Cash() {
           status: 'open',
           opened_at: new Date().toISOString()
         }])
-        .select()
-        .single()
+        .select().single()
 
       if (error) throw error
-
       if (selectedRegister) {
-        await supabase
-          .from('cash_registers')
-          .update({ status: 'open', current_balance: monto })
-          .eq('id', selectedRegister)
+        await supabase.from('cash_registers').update({ status: 'open', current_balance: monto }).eq('id', selectedRegister)
       }
-
-      alert('¡Caja abierta con éxito! Ya puede ir a Cobranzas a aplicar pagos.')
+      alert('¡Caja abierta con éxito!')
       setOpeningBalance('')
       checkActiveSession()
     } catch (err) {
@@ -127,15 +155,9 @@ function Cash() {
     try {
       const { error: sessionErr } = await supabase
         .from('cash_sessions')
-        .update({
-          status: 'closed',
-          closed_at: new Date().toISOString(),
-          closing_balance: activeSession.current_balance
-        })
+        .update({ status: 'closed', closed_at: new Date().toISOString(), closing_balance: activeSession.current_balance })
         .eq('id', activeSession.id)
-
       if (sessionErr) throw sessionErr
-
       alert('Caja cerrada correctamente.')
       setActiveSession(null)
       setMovements([])
@@ -152,39 +174,29 @@ function Cash() {
     <div className="space-y-5 animate-fade-in">
       <div>
         <h2 className="text-xl font-bold text-hpa-slate-9">Control de Caja y Flujo</h2>
-        <p className="text-xs text-hpa-slate-5 mt-0.5">Gestión diaria de disponibilidad de efectivo, aperturas y arqueos de caja</p>
+        <p className="text-xs text-hpa-slate-5 mt-0.5">Gestión diaria de disponibilidad de efectivo</p>
       </div>
 
       {!activeSession ? (
         <div className="max-w-md mx-auto card p-6 mt-6 border border-hpa-slate-2 shadow-sm">
           <div className="text-center space-y-2 mb-6">
-            <div className="p-3 bg-amber-50 text-amber-700 rounded-full inline-block border border-amber-200">
-              <Lock size={24} />
-            </div>
+            <div className="p-3 bg-amber-50 text-amber-700 rounded-full inline-block border border-amber-200"><Lock size={24} /></div>
             <h3 className="text-base font-bold text-hpa-slate-9">Caja Fuera de Servicio</h3>
-            <p className="text-xs text-hpa-slate-4">Su usuario no posee una sesión de trabajo activa en esta sucursal.</p>
           </div>
-
           <form onSubmit={handleOpenSession} className="space-y-4">
             <Field label="Seleccionar Terminal / Caja Física" required>
               <select className="select" value={selectedRegister} onChange={e => setSelectedRegister(e.target.value)}>
-                {registers.length === 0 ? (
-                  <option value="">Caja General Autodetectada</option>
-                ) : registers.map(reg => (
-                  <option key={reg.id} value={reg.id}>
-                    {reg.name} ({reg.code}) — Bal: {fmt(reg.current_balance, reg.currency)}
-                  </option>
+                {registers.length === 0 ? <option value="">Caja General Autodetectada</option> : registers.map(reg => (
+                  <option key={reg.id} value={reg.id}>{reg.name} — {fmt(reg.current_balance)}</option>
                 ))}
               </select>
             </Field>
-
             <Field label="Monto de Apertura" required>
               <div className="relative">
                 <DollarSign className="absolute left-3 top-2.5 text-hpa-slate-4" size={16} />
                 <input type="number" step="0.01" className="input pl-9 font-bold" placeholder="0.00" value={openingBalance} onChange={e => setOpeningBalance(e.target.value)} />
               </div>
             </Field>
-
             <button type="submit" className="btn btn-primary w-full flex items-center justify-center gap-2" disabled={submitting}>
               {submitting ? <Spinner size={14} /> : <><Unlock size={14} /> Inicializar Sesión de Caja</>}
             </button>
@@ -192,27 +204,23 @@ function Cash() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          <div className="lg:col-span-4 space-y-4">
+          <div className="lg:col-span-4">
             <div className="card p-5 bg-hpa-slate-9 text-white border-0 space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-white/60 uppercase">Estatus de Sesión</p>
-                <h3 className="text-base font-bold mt-0.5">Sesión Abierta por el Usuario</h3>
-              </div>
+              <h3 className="text-base font-bold">Sesión Abierta</h3>
               <hr className="border-white/10" />
               <div>
-                <p className="text-[11px] text-white/60 uppercase">Fondo de Apertura</p>
-                <p className="text-sm font-medium font-numeric">{fmt(activeSession.opening_balance)}</p>
+                <p className="text-[11px] text-white/60 uppercase">Apertura</p>
+                <p className="text-sm font-medium">{fmt(activeSession.opening_balance)}</p>
               </div>
               <div>
-                <p className="text-[11px] text-emerald-400 font-bold uppercase">Efectivo Disponible</p>
-                <p className="text-2xl font-black font-numeric text-emerald-400">{fmt(activeSession.current_balance)}</p>
+                <p className="text-[11px] text-emerald-400 font-bold uppercase">Disponible</p>
+                <p className="text-2xl font-black text-emerald-400">{fmt(activeSession.current_balance)}</p>
               </div>
-              <button onClick={handleCloseSession} className="btn bg-red-600 hover:bg-red-700 text-white border-0 w-full text-xs font-bold py-2 flex items-center justify-center gap-1.5" disabled={submitting}>
-                {submitting ? <Spinner size={12} /> : <><Lock size={12} /> Realizar Cierre Diario</>}
+              <button onClick={handleCloseSession} className="btn bg-red-600 hover:bg-red-700 text-white border-0 w-full text-xs font-bold py-2" disabled={submitting}>
+                {submitting ? <Spinner size={12} /> : 'Realizar Cierre Diario'}
               </button>
             </div>
           </div>
-
           <div className="lg:col-span-8">
             <div className="card p-0">
               <div className="p-4 border-b border-hpa-slate-2 flex justify-between items-center">
@@ -221,17 +229,13 @@ function Cash() {
                   <RefreshCw size={14} className={loadingMovements ? 'animate-spin' : ''} />
                 </button>
               </div>
+              <MovementsTable movements={movements} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
-              <div className="table-wrapper max-h-[450px] overflow-y-auto">
-                <table className="table text-xs">
-                  <thead>
-                    <tr>
-                      <th>Hora</th>
-                      <th>Tipo</th>
-                      <th>Concepto</th>
-                      <th className="text-right">Monto</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {movements.length === 0 ? (
-                      <tr><td colSpan={4} className="py-12"><Empty icon={ClipboardList} title="Sin movimientos" desc="No hay transacciones todavía." /></td></tr>
+export default Cash
