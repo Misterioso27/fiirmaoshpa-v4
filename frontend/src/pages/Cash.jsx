@@ -19,18 +19,14 @@ function Cash() {
   const [selectedRegister, setSelectedRegister] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // Cargar las terminales de caja disponibles
   const loadRegisters = useCallback(async () => {
     try {
       let query = supabase.from('cash_registers').select('*')
-      
       if (branchId) {
         query = query.eq('branch_id', branchId)
       }
-
       const { data, error } = await query
       if (error) throw error
-      
       setRegisters(data || [])
       if (data?.length > 0) {
         setSelectedRegister(data[0].id)
@@ -44,7 +40,6 @@ function Cash() {
     if (!user?.id) return
     setLoading(true)
     try {
-      // Ajustamos la consulta para traer la sesión activa del usuario de forma limpia
       const { data, error } = await supabase
         .from('cash_sessions')
         .select('*')
@@ -94,7 +89,6 @@ function Cash() {
 
     setSubmitting(true)
     try {
-      // CORRECCIÓN FINAL: Enviamos solo los campos universales seguros de cash_sessions
       const { data, error } = await supabase
         .from('cash_sessions')
         .insert([{
@@ -110,7 +104,6 @@ function Cash() {
 
       if (error) throw error
 
-      // Si hay una caja seleccionada en la UI, actualizamos su estado general
       if (selectedRegister) {
         await supabase
           .from('cash_registers')
@@ -208,20 +201,3 @@ function Cash() {
               <div>
                 <p className="text-[11px] text-white/60 uppercase">Fondo de Apertura</p>
                 <p className="text-sm font-medium font-numeric">{fmt(activeSession.opening_balance)}</p>
-              </div>
-              <div>
-                <p className="text-[11px] text-emerald-400 font-bold uppercase">Efectivo Disponible</p>
-                <p className="text-2xl font-black font-numeric text-emerald-400">{fmt(activeSession.current_balance)}</p>
-              </div>
-              <button onClick={handleCloseSession} className="btn bg-red-600 hover:bg-red-700 text-white border-0 w-full text-xs font-bold py-2 flex items-center justify-center gap-1.5" disabled={submitting}>
-                {submitting ? <Spinner size={12} /> : <><Lock size={12} /> Realizar Cierre Diario</>}
-              </button>
-            </div>
-          </div>
-
-          <div className="lg:col-span-8">
-            <div className="card p-0">
-              <div className="p-4 border-b border-hpa-slate-2 flex justify-between items-center">
-                <p className="text-xs font-bold text-hpa-slate-7 uppercase">Historial de Caja</p>
-                <button onClick={() => loadMovements(activeSession.id)} className="btn btn-ghost p-2" disabled={loadingMovements}>
-                  <RefreshCw size={14} className={loadingMovements ? 'animate
