@@ -19,17 +19,22 @@ function Cash() {
   const [selectedRegister, setSelectedRegister] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  // CORRECCIÓN: Quitamos el filtro estricto de status='active' para que aparezcan tus terminales creadas
   const loadRegisters = useCallback(async () => {
-    if (!branchId) return
     try {
-      const { data, error } = await supabase
-        .from('cash_registers')
-        .select('*')
-        .eq('branch_id', branchId)
-        .eq('status', 'active')
+      let query = supabase.from('cash_registers').select('*')
+      
+      if (branchId) {
+        query = query.eq('branch_id', branchId)
+      }
+
+      const { data, error } = await query
       if (error) throw error
+      
       setRegisters(data || [])
-      if (data?.length > 0) setSelectedRegister(data[0].id)
+      if (data?.length > 0) {
+        setSelectedRegister(data[0].id)
+      }
     } catch (err) {
       console.error('Error cargando cajas:', err.message)
     }
@@ -75,11 +80,11 @@ function Cash() {
   }
 
   useEffect(() => {
-    if (branchId && user?.id) {
-      loadRegisters()
+    loadRegisters()
+    if (user?.id) {
       checkActiveSession()
     }
-  }, [branchId, user?.id, loadRegisters, checkActiveSession])
+  }, [user?.id, loadRegisters, checkActiveSession])
 
   const handleOpenSession = async (e) => {
     e.preventDefault()
@@ -98,8 +103,8 @@ function Cash() {
       const { data, error } = await supabase
         .from('cash_sessions')
         .insert([{
-          company_id: companyId,
-          branch_id: branchId,
+          company_id: companyId || null,
+          branch_id: branchId || null,
           cash_register_id: selectedRegister,
           user_id: user.id,
           opening_balance: monto,
@@ -117,7 +122,7 @@ function Cash() {
         .update({ status: 'open', current_balance: monto })
         .eq('id', selectedRegister)
 
-      alert('¡Caja abierta con éxito!')
+      alert('¡Caja abierta con éxito! Ya puede ir a Cobranzas a aplicar pagos.')
       setOpeningBalance('')
       checkActiveSession()
     } catch (err) {
@@ -178,7 +183,9 @@ function Cash() {
           <form onSubmit={handleOpenSession} className="space-y-4">
             <Field label="Seleccionar Terminal / Caja Física" required>
               <select className="select" value={selectedRegister} onChange={e => setSelectedRegister(e.target.value)}>
-                {registers.map(reg => (
+                {registers.length === 0 ? (
+                  <option value="">No hay terminales creadas en la Base de Datos</option>
+                ) : registers.map(reg => (
                   <option key={reg.id} value={reg.id}>
                     {reg.name} ({reg.code}) — Bal: {fmt(reg.current_balance, reg.currency)}
                   </option>
