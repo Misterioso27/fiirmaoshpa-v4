@@ -19,7 +19,7 @@ function Cash() {
   const [selectedRegister, setSelectedRegister] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // CORRECCIÓN: Quitamos el filtro estricto de status='active' para que aparezcan tus terminales creadas
+  // Cargar las terminales de caja
   const loadRegisters = useCallback(async () => {
     try {
       let query = supabase.from('cash_registers').select('*')
@@ -100,11 +100,11 @@ function Cash() {
 
     setSubmitting(true)
     try {
+      // CORRECCIÓN: Removido branch_id del insert para alinearse con el esquema real
       const { data, error } = await supabase
         .from('cash_sessions')
         .insert([{
           company_id: companyId || null,
-          branch_id: branchId || null,
           cash_register_id: selectedRegister,
           user_id: user.id,
           opening_balance: monto,
