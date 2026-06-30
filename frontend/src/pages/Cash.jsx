@@ -1,192 +1,193 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Landmark, Plus, Lock, Unlock } from 'lucide-react'
-import { db, fmt, fmtDateTime } from '@/lib/supabase'
-import { Modal, Field, Empty, Spinner } from '@/components/ui'
+import { DollarSign, ArrowUpRight, ArrowDownLeft, Lock, Unlock, ClipboardList, RefreshCw } from 'lucide-react'
+import { supabase, fmt, fmtDate } from '@/lib/supabase'
+import { Field, Spinner, Empty } from '@/components/ui'
+import useAuthStore from '@/store/auth'
 
-export default function Cash() {
+function CashManagement() {
+  const { user } = useAuthStore()
+  const companyId = user?.company?.id
+  const branchId  = user?.branch?.id
+
+  // Estados de carga y catálogos
+  const [loading, setLoading] = useState(false)
   const [registers, setRegisters] = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [showOpen, setShowOpen]   = useState(null)
-  const [showClose, setShowClose] = useState(null)
-  const [showMove, setShowMove]   = useState(null)
-  const [form, setForm]           = useState({})
-  const [saving, setSaving]       = useState(false)
+  
+  // Estados de la sesión actual
+  const [activeSession, setActiveSession] = useState(null)
+  const [movements, setMovements] = useState([])
+  const [loadingMovements, setLoadingMovements] = useState(false)
 
-  useEffect(() => { load() }, [])
+  // Formularios
+  const [openingBalance, setOpeningBalance] = useState('')
+  const [selectedRegister, setSelectedRegister] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  async function load() {
+  // 1. Cargar las cajas físicas disponibles para la sucursal
+  const loadRegisters = useCallback(async () => {
+    if (!branchId) return
+    try {
+      const { data, error } = await supabase
+        .from('cash_registers')
+        .select('*')
+        .eq('branch_id', branchId)
+        .eq('status', 'active')
+      if (error) throw error
+      setRegisters(data || [])
+      if (data?.length > 0) setSelectedRegister(data[0].id)
+    } catch (err) {
+      console.error('Error cargando cajas:', err.message)
+    }
+  }, [branchId])
+
+  // 2. Verificar si hay una sesión abierta para el usuario actual
+  const checkActiveSession = useCallback(async () => {
+    if (!user?.id) return
     setLoading(true)
     try {
-      const data = await api.get('/cash-registers')
-      setRegisters(data.registers || [])
-    } catch {}
+      const { data, error } = await supabase
+        .from('cash_sessions')
+        .select(`
+          id, status, opening_balance, current_balance, opened_at, cash_register_id,
+          cash_registers (name, code, currency)
+        `)
+        .eq('user_id', user.id)
+        .eq('status', 'open')
+        .maybeSingle()
+
+      if (error) throw error
+      setActiveSession(data)
+      
+      if (data) {
+        loadMovements(data.id)
+      }
+    } catch (err) {
+      console.error('Error verificando sesión de caja:', err.message)
+    }
     setLoading(false)
+  }, [user?.id])
+
+  // 3. Cargar movimientos de la sesión activa
+  const loadMovements = async (sessionId) => {
+    setLoadingMovements(true)
+    try {
+      const { data, error } = await supabase
+        .from('cash_movements')
+        .select('*')
+        .eq('cash_session_id', sessionId)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setMovements(data || [])
+    } catch (err) {
+      console.error('Error cargando movimientos:', err.message)
+    }
+    setLoadingMovements(false)
   }
 
-  function fc(k,v) { setForm(f=>({...f,[k]:v})) }
+  useEffect(() => {
+    if (branchId && user?.id) {
+      loadRegisters()
+      checkActiveSession()
+    }
+  }, [branchId, user?.id, loadRegisters, checkActiveSession])
 
-  async function openSession(reg) {
-    setSaving(true)
+  // 4. Ejecutar Apertura de Caja
+  const handleOpenSession = async (e) => {
+    e.preventDefault()
+    const monto = parseFloat(openingBalance)
+    if (isNaN(monto) || monto < 0) {
+      alert('Por favor ingrese un monto de apertura válido.')
+      return
+    }
+    if (!selectedRegister) {
+      alert('Debe seleccionar una caja física para operar.')
+      return
+    }
+
+    setSubmitting(true)
     try {
-      await api.post('/cash-sessions', { register_id: reg.id, opening_balance: form.opening_balance || 0, opening_notes: form.opening_notes })
-      setShowOpen(null)
-      load()
-    } catch (err) { alert(err.message) }
-    setSaving(false)
+      // Insertar nueva sesión de caja
+      const { data, error } = await supabase
+        .from('cash_sessions')
+        .insert([{
+          company_id: companyId,
+          branch_id: branchId,
+          cash_register_id: selectedRegister,
+          user_id: user.id,
+          opening_balance: monto,
+          current_balance: monto,
+          status: 'open',
+          opened_at: new Date().toISOString()
+        }])
+        .select()
+        .single()
+
+      if (error) throw error
+
+      // Actualizar el estado de la caja física a "ocupada/abierta"
+      await supabase
+        .from('cash_registers')
+        .update({ status: 'open', current_balance: monto })
+        .eq('id', selectedRegister)
+
+      alert('¡Caja abierta con éxito! Ya puede procesar cobros y desembolsos.')
+      setOpeningBalance('')
+      checkActiveSession()
+    } catch (err) {
+      alert('Error al abrir caja: ' + err.message)
+    }
+    setSubmitting(false)
   }
 
-  async function closeSession(reg) {
-    setSaving(true)
+  // 5. Ejecutar Cierre de Caja (Cuadre de Efectivo)
+  const handleCloseSession = async () => {
+    if (!window.confirm(`¿Está seguro que desea cerrar la caja con un balance actual de ${fmt(activeSession.current_balance, activeSession.cash_registers?.currency)}?`)) {
+      return
+    }
+
+    setSubmitting(true)
     try {
-      await api.put(`/cash-sessions/${reg.active_session_id}/close`, { closing_balance: form.closing_balance, closing_notes: form.closing_notes })
-      setShowClose(null)
-      load()
-    } catch (err) { alert(err.message) }
-    setSaving(false)
+      // Actualizar la sesión de caja a cerrada
+      const { error: sessionErr } = await supabase
+        .from('cash_sessions')
+        .update({
+          status: 'closed',
+          closed_at: new Date().toISOString(),
+          closing_balance: activeSession.current_balance
+        })
+        .eq('id', activeSession.id)
+
+      if (sessionErr) throw sessionErr
+
+      // Devolver la caja física a estado "activo" (disponible para otra sesión)
+      await supabase
+        .from('cash_registers')
+        .update({ status: 'active' })
+        .eq('id', activeSession.cash_register_id)
+
+      alert('Caja cerrada correctamente y bloqueada para nuevas transacciones.')
+      setActiveSession(null)
+      setMovements([])
+      loadRegisters()
+    } catch (err) {
+      alert('Error al cerrar la caja: ' + err.message)
+    }
+    setSubmitting(false)
   }
 
-  async function addMovement() {
-    setSaving(true)
-    try {
-      await api.post(`/cash-sessions/${showMove.active_session_id}/movements`, form)
-      setShowMove(null)
-      load()
-    } catch (err) { alert(err.message) }
-    setSaving(false)
+  if (loading) {
+    return <div className="p-12 text-center"><Spinner size={24} className="mx-auto" /></div>
   }
 
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h2 className="text-xl font-bold text-hpa-slate-9">Caja y Tesorería</h2>
-        <p className="text-xs text-hpa-slate-5 mt-0.5">{registers.length} cajas registradas</p>
+        <h2 className="text-xl font-bold text-hpa-slate-9">Control de Caja y Flujo</h2>
+        <p className="text-xs text-hpa-slate-5 mt-0.5">Gestión diaria de disponibilidad de efectivo, aperturas y arqueos de caja</p>
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-12"><Spinner size={24} /></div>
-      ) : registers.length === 0 ? (
-        <Empty icon={Landmark} title="Sin cajas registradas" desc="Configura las cajas desde Configuración" />
-      ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          {registers.map(reg => (
-            <div key={reg.id} className="card">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="font-semibold text-hpa-slate-9">{reg.name}</h3>
-                  <p className="text-xs text-hpa-slate-5">{reg.code} · {reg.currency}</p>
-                </div>
-                <span className={`badge ${reg.status === 'open' ? 'badge-green' : 'badge-gray'}`}>
-                  {reg.status === 'open' ? 'Abierta' : 'Cerrada'}
-                </span>
-              </div>
-              <div className="p-4 bg-hpa-slate-1 rounded-xl mb-4">
-                <p className="text-xs text-hpa-slate-5 mb-0.5">Saldo Actual</p>
-                <p className="text-2xl font-bold font-numeric text-hpa-slate-9">{fmt(reg.current_balance, reg.currency)}</p>
-              </div>
-              <div className="flex gap-2">
-                {reg.status === 'closed' ? (
-                  <button className="btn btn-primary btn-sm flex-1" onClick={() => { setShowOpen(reg); setForm({}) }}>
-                    <Unlock size={13} /> Abrir Caja
-                  </button>
-                ) : (
-                  <>
-                    <button className="btn btn-ghost btn-sm flex-1" onClick={() => { setShowMove(reg); setForm({}) }}>
-                      <Plus size={13} /> Movimiento
-                    </button>
-                    <button className="btn btn-danger btn-sm flex-1" onClick={() => { setShowClose(reg); setForm({}) }}>
-                      <Lock size={13} /> Cerrar Caja
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Open session */}
-      <Modal open={!!showOpen} onClose={() => setShowOpen(null)} title={`Abrir Caja — ${showOpen?.name}`}
-        footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => setShowOpen(null)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={() => openSession(showOpen)} disabled={saving}>
-              {saving ? <Spinner size={14} /> : 'Abrir Sesión'}
-            </button>
-          </>
-        }>
-        <div className="space-y-4">
-          <Field label="Balance de apertura">
-            <input className="input" type="number" value={form.opening_balance||''} onChange={e=>fc('opening_balance',e.target.value)} placeholder="0.00" />
-          </Field>
-          <Field label="Notas de apertura">
-            <textarea className="input h-20 resize-none" value={form.opening_notes||''} onChange={e=>fc('opening_notes',e.target.value)} />
-          </Field>
-        </div>
-      </Modal>
-
-      {/* Close session */}
-      <Modal open={!!showClose} onClose={() => setShowClose(null)} title={`Cerrar Caja — ${showClose?.name}`}
-        footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => setShowClose(null)}>Cancelar</button>
-            <button className="btn btn-danger" onClick={() => closeSession(showClose)} disabled={saving}>
-              {saving ? <Spinner size={14} /> : 'Cerrar y Arquear'}
-            </button>
-          </>
-        }>
-        <div className="space-y-4">
-          <Field label="Balance de cierre (contado físico)">
-            <input className="input" type="number" value={form.closing_balance||''} onChange={e=>fc('closing_balance',e.target.value)} placeholder="0.00" />
-          </Field>
-          <Field label="Notas de cierre">
-            <textarea className="input h-20 resize-none" value={form.closing_notes||''} onChange={e=>fc('closing_notes',e.target.value)} />
-          </Field>
-        </div>
-      </Modal>
-
-      {/* Movement */}
-      <Modal open={!!showMove} onClose={() => setShowMove(null)} title="Registrar Movimiento"
-        footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => setShowMove(null)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={addMovement} disabled={saving}>
-              {saving ? <Spinner size={14} /> : 'Registrar'}
-            </button>
-          </>
-        }>
-        <div className="space-y-4">
-          <div className="form-row">
-            <Field label="Tipo">
-              <select className="select" value={form.type||''} onChange={e=>fc('type',e.target.value)}>
-                <option value="">Seleccionar...</option>
-                {['income','expense','transfer_in','transfer_out','adjustment'].map(t=><option key={t}>{t}</option>)}
-              </select>
-            </Field>
-            <Field label="Categoría">
-              <select className="select" value={form.category||''} onChange={e=>fc('category',e.target.value)}>
-                <option value="">Seleccionar...</option>
-                {['loan_payment','investment_deposit','loan_disbursement','investment_withdrawal','expense_operational','expense_admin','transfer','other'].map(c=><option key={c}>{c}</option>)}
-              </select>
-            </Field>
-          </div>
-          <div className="form-row">
-            <Field label="Monto" required>
-              <input className="input" type="number" value={form.amount||''} onChange={e=>fc('amount',e.target.value)} />
-            </Field>
-            <Field label="Moneda">
-              <select className="select" value={form.currency||'DOP'} onChange={e=>fc('currency',e.target.value)}>
-                {['DOP','USD','BRL'].map(c=><option key={c}>{c}</option>)}
-              </select>
-            </Field>
-          </div>
-          <Field label="Descripción" required>
-            <input className="input" value={form.description||''} onChange={e=>fc('description',e.target.value)} />
-          </Field>
-          <Field label="No. Recibo / Referencia">
-            <input className="input" value={form.receipt_number||''} onChange={e=>fc('receipt_number',e.target.value)} />
-          </Field>
-        </div>
-      </Modal>
-    </div>
-  )
-}
+      {!activeSession ? (
+        /* VISTA DE CAJA CERRADA: FORMULARIO DE APERTURA */
+        <div className="max-w-md mx-auto card p-6 mt-6 border border-hpa-slate-2 shadow-sm">
+          <div className="text-center space-y-2 mb-6">
+            <div className="p-3 bg-amber-50 text-amber-700 rounded-full inline-block border
