@@ -185,4 +185,4 @@ function Cash() {
             </Field>
 
             <button type="submit" className="btn btn-primary w-full flex items-center justify-center gap-2" disabled={submitting}>
-              {submitting ? <Spinner size={14} /> : <><Unlock size={14}
+              {submitting ? <Spinner size={14} /> :
