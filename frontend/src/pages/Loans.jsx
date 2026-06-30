@@ -127,9 +127,10 @@ function Loans() {
         .limit(100)
       setClients(cls || [])
 
+      // ¡CORREGIDO AQUÍ! Se cambió 'type' por 'category'
       const { data: prods } = await supabase
         .from('financial_products')
-        .select('id, name, type')
+        .select('id, name, category')
         .eq('company_id', companyId)
       setProducts(prods || [])
     } catch {}
@@ -182,10 +183,10 @@ function Loans() {
       const plazoOriginal = parseFloat(form.term_months)
       const tipoFormulario = (form.type || 'personal').toLowerCase()
       
-      let productoEncontrado = products.find(p => (p.type || '').toLowerCase() === tipoFormulario)
+      let productoEncontrado = products.find(p => (p.category || '').toLowerCase() === tipoFormulario)
       if (!productoEncontrado) {
         productoEncontrado = products.find(p => 
-          (p.type || '').toLowerCase().includes(tipoFormulario) || 
+          (p.category || '').toLowerCase().includes(tipoFormulario) || 
           (p.name || '').toLowerCase().includes(tipoFormulario)
         )
       }
@@ -201,13 +202,19 @@ function Loans() {
           mortgage: 'Terreno / Propiedad'
         }
         
-        // Eliminado por completo el campo 'status' para evitar choques con el esquema
         const { data: nuevoProd, error: prodErr } = await supabase
           .from('financial_products')
           .insert([{
             company_id: companyId,
+            code: `PROD-${tipoFormulario.toUpperCase()}-${Date.now().toString().slice(-4)}`,
             name: nombresMapeados[tipoFormulario] || 'Préstamo General',
-            type: tipoFormulario
+            category: tipoFormulario,
+            rate_monthly: parseFloat(form.rate_monthly) || 30.0,
+            rate_annual: (parseFloat(form.rate_monthly) || 30.0) * 12,
+            rate_type: 'fixed',
+            currencies: [form.currency || 'DOP'],
+            is_active: true,
+            created_by: user.id
           }])
           .select('id')
           .single()
