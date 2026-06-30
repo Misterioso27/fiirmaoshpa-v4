@@ -1,172 +1,395 @@
 import { useState, useEffect, useCallback } from 'react'
-import { PhoneCall, Search, AlertTriangle } from 'lucide-react'
-import { db, fmt, fmtDate } from '@/lib/supabase'
-import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
+import { Search, DollarSign, Calendar, Receipt, AlertCircle, CheckCircle2, FileText, ArrowRight } from 'lucide-react'
+import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
+import { StatusBadge, Modal, Field, Spinner, Empty } from '@/components/ui'
+import useAuthStore from '@/store/auth'
 
-const STAGE_COLORS = {
-  preventive: 'badge-blue', early: 'badge-amber',
-  advanced: 'badge-red', recovery: 'badge-red', legal: 'badge-red'
-}
-const STAGE_LABELS = {
-  preventive: 'Preventiva', early: 'Temprana',
-  advanced: 'Avanzada', recovery: 'Recuperación', legal: 'Legal'
-}
+function Collections() {
+  const { user } = useAuthStore()
+  const companyId = user?.company?.id
+  const branchId  = user?.branch?.id
 
-export default function Collections() {
-  const [cases, setCases]   = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [page, setPage]     = useState(1)
-  const [pagination, setPagination] = useState({})
-  const [stage, setStage]   = useState('')
-  const [showAction, setShowAction] = useState(null)
-  const [actionForm, setActionForm] = useState({})
-  const [saving, setSaving] = useState(false)
+  // Estados de carga y datos
+  const [loading, setLoading] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [activeLoans, setActiveLoans] = useState([])
+  const [selectedLoan, setSelectedLoan] = useState(null)
+  const [schedule, setSchedule] = useState([])
+  const [loadingSchedule, setLoadingSchedule] = useState(false)
 
-  const load = useCallback(async () => {
+  // Estado de Caja Activa
+  const [activeSession, setActiveSession] = useState(null)
+  const [checkingSession, setCheckingSession] = useState(true)
+
+  // Estados del Modal de Pago
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [selectedInstallment, setSelectedInstallment] = useState(null)
+  const [submittingPayment, setSubmittingPayment] = useState(false)
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    payment_method: 'cash',
+    reference: '',
+    notes: ''
+  })
+
+  // 1. Verificar si el usuario tiene una sesión de caja abierta
+  const checkCashSession = useCallback(async () => {
+    if (!user?.id) return
+    setCheckingSession(true)
+    try {
+      const { data, error } = await supabase
+        .from('cash_sessions')
+        .select('id, status')
+        .eq('user_id', user.id)
+        .eq('status', 'open')
+        .maybeSingle()
+
+      if (error) throw error
+      setActiveSession(data)
+    } catch (err) {
+      console.error('Error verificando caja:', err.message)
+    }
+    setCheckingSession(false)
+  }, [user?.id])
+
+  useEffect(() => { checkCashSession() }, [checkCashSession])
+
+  // 2. Buscar Préstamos Activos o en Mora
+  const searchLoans = async (e) => {
+    if (e) e.preventDefault()
+    if (!companyId) return
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page, limit: 20 })
-      if (stage) params.set('stage', stage)
-      const data = await api.get(`/collections?${params}`)
-      setCases(data.cases || [])
-      setPagination(data.pagination || {})
-    } catch {}
+      // Buscamos préstamos cuyo estado requiera gestión de cobro
+      let query = supabase
+        .from('loans')
+        .select(`
+          id, loan_code, principal, balance_total, balance_principal, 
+          balance_interest, balance_penalties, days_overdue, status, currency,
+          clients (id, first_name, last_name, client_code, phone_primary)
+        `)
+        .eq('company_id', companyId)
+        .in('status', ['active', 'overdue', 'defaulted'])
+
+      if (searchTerm.trim()) {
+        // Filtro básico por código de préstamo
+        query = query.ilike('loan_code', `%${searchTerm}%`)
+      }
+
+      const { data, error } = await query.limit(20)
+      if (error) throw error
+      setActiveLoans(data || [])
+    } catch (err) {
+      alert('Error al buscar préstamos: ' + err.message)
+    }
     setLoading(false)
-  }, [page, stage])
+  }
 
-  useEffect(() => { load() }, [load])
+  // Cargar lista inicial al montar
+  useEffect(() => { if (companyId) searchLoans() }, [companyId])
 
-  async function saveAction() {
-    setSaving(true)
+  // 3. Cargar el Calendario de Cuotas de un Préstamo Seleccionado
+  const loadLoanDetails = async (loan) => {
+    setSelectedLoan(loan)
+    setLoadingSchedule(true)
     try {
-      await api.post(`/collections/${showAction.id}/actions`, actionForm)
-      setShowAction(null)
-      load()
-    } catch (err) { alert(err.message) }
-    setSaving(false)
+      const { data, error } = await supabase
+        .from('loan_schedule')
+        .select('*')
+        .eq('loan_id', loan.id)
+        .order('installment_num', { ascending: true })
+
+      if (error) throw error
+      setSchedule(data || [])
+    } catch (err) {
+      alert('Error al cargar cuotas: ' + err.message)
+    }
+    setLoadingSchedule(false)
+  }
+
+  // 4. Abrir Modal para aplicar cobro a una cuota específica
+  const openPaymentModal = (installment) => {
+    setSelectedInstallment(installment)
+    // Autorellenar con el balance pendiente de esa cuota específica
+    setPaymentForm({
+      amount: installment.balance || installment.total_due,
+      payment_method: 'cash',
+      reference: '',
+      notes: ''
+    })
+    setShowPaymentModal(true)
+  }
+
+  // 5. Procesar e Inserción de Pago con Distribución Contable Correcta
+  const handleApplyPayment = async () => {
+    if (!activeSession) {
+      alert('Error: Debe abrir una sesión de caja antes de recibir pagos.')
+      return
+    }
+
+    const montoAPagar = parseFloat(paymentForm.amount)
+    if (!montoAPagar || montoAPagar <= 0) {
+      alert('Por favor, ingrese un monto válido mayor a cero.')
+      return
+    }
+
+    setSubmittingPayment(true)
+    try {
+      // Lógica de Amortización: Distribuir el dinero según prioridades estándar
+      let restante = montoAPagar
+      
+      // A. Penalidades / Mora pendientes en la cuota
+      const moraPendiente = parseFloat(selectedInstallment.penalty_amount || 0) - parseFloat(selectedInstallment.penalty_paid || 0)
+      const penaltyApplied = Math.min(restante, Math.max(0, moraPendiente))
+      restante -= penaltyApplied
+
+      // B. Intereses pendientes en la cuota
+      const interesPendiente = parseFloat(selectedInstallment.interest || 0) - parseFloat(selectedInstallment.interest_paid || 0)
+      const interestApplied = Math.min(restante, Math.max(0, interesPendiente))
+      restante -= interestApplied
+
+      // C. Capital pendiente en la cuota
+      const capitalPendiente = parseFloat(selectedInstallment.principal || 0) - parseFloat(selectedInstallment.principal_paid || 0)
+      const principalApplied = Math.min(restante, Math.max(0, capitalPendiente))
+      restante -= principalApplied
+
+      // Generar el correlativo o número de recibo de pago temporal
+      const numRecibo = `REC-${Date.now().toString().slice(-6)}`
+
+      // 1. Insertar el recibo en 'loan_payments'
+      const { error: payErr } = await supabase
+        .from('loan_payments')
+        .insert([{
+          loan_id: selectedLoan.id,
+          schedule_id: selectedInstallment.id,
+          payment_number: numRecibo,
+          amount: montoAPagar,
+          principal_applied: principalApplied,
+          interest_applied: interestApplied,
+          penalty_applied: penaltyApplied,
+          currency: selectedLoan.currency,
+          fx_rate: 1.0,
+          payment_method: paymentForm.payment_method,
+          reference: paymentForm.reference || null,
+          cash_session_id: activeSession.id,
+          notes: paymentForm.notes || null,
+          created_by: user.id
+        }])
+
+      if (payErr) throw payErr
+
+      // 2. Actualizar la cuota específica en 'loan_schedule'
+      const nuevoPrincipalPaid = parseFloat(selectedInstallment.principal_paid || 0) + principalApplied
+      const nuevoInterestPaid  = parseFloat(selectedInstallment.interest_paid || 0) + interestApplied
+      const nuevoPenaltyPaid   = parseFloat(selectedInstallment.penalty_paid || 0) + penaltyApplied
+      const nuevoTotalPaid     = parseFloat(selectedInstallment.total_paid || 0) + montoAPagar
+      const nuevoBalance       = Math.max(0, parseFloat(selectedInstallment.total_due) - nuevoTotalPaid)
+      
+      // Determinar el nuevo estado de la cuota
+      const nuevoStatus = nuevoBalance <= 0 ? 'paid' : 'partial'
+
+      const { error: schedErr } = await supabase
+        .from('loan_schedule')
+        .update({
+          principal_paid: nuevoPrincipalPaid,
+          interest_paid: nuevoInterestPaid,
+          penalty_paid: nuevoPenaltyPaid,
+          total_paid: nuevoTotalPaid,
+          balance: nuevoBalance,
+          status: nuevoStatus,
+          paid_at: nuevoStatus === 'paid' ? new Date().toISOString() : selectedInstallment.paid_at
+        })
+        .eq('id', selectedInstallment.id)
+
+      if (schedErr) throw schedErr
+
+      // 3. Afectar los saldos globales del préstamo en la tabla 'loans'
+      const nuevoLoanBalPrincipal = Math.max(0, parseFloat(selectedLoan.balance_principal) - principalApplied)
+      const nuevoLoanBalInterest  = Math.max(0, parseFloat(selectedLoan.balance_interest) - interestApplied)
+      const nuevoLoanBalPenalties = Math.max(0, parseFloat(selectedLoan.balance_penalties) - penaltyApplied)
+      const nuevoLoanBalTotal     = Math.max(0, parseFloat(selectedLoan.balance_total) - montoAPagar)
+      
+      const nuevoLoanStatus = nuevoLoanBalTotal <= 0 ? 'paid' : selectedLoan.status
+
+      const { error: loanErr } = await supabase
+        .from('loans')
+        .update({
+          balance_principal: nuevoLoanBalPrincipal,
+          balance_interest: nuevoLoanBalInterest,
+          balance_penalties: nuevoLoanBalPenalties,
+          balance_total: nuevoLoanBalTotal,
+          status: nuevoLoanStatus
+        })
+        .eq('id', selectedLoan.id)
+
+      if (loanErr) throw loanErr
+
+      // Todo correcto: Refrescar interfaz de inmediato
+      setShowPaymentModal(false)
+      // Actualizar el préstamo en memoria para mantener consistencia visual
+      const updatedLoan = {
+        ...selectedLoan,
+        balance_principal: nuevoLoanBalPrincipal,
+        balance_interest: nuevoLoanBalInterest,
+        balance_penalties: nuevoLoanBalPenalties,
+        balance_total: nuevoLoanBalTotal,
+        status: nuevoLoanStatus
+      }
+      setSelectedLoan(updatedLoan)
+      loadLoanDetails(updatedLoan)
+      searchLoans()
+      
+      alert(`¡Cobro aplicado con éxito! Recibo: ${numRecibo}`)
+    } catch (err) {
+      alert('Error crítico al procesar cobro: ' + err.message)
+    }
+    setSubmittingPayment(false)
   }
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+      {/* Barra superior informativa de Caja */}
+      <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-hpa-slate-2 shadow-sm">
         <div>
-          <h2 className="text-xl font-bold text-hpa-slate-9">Cobranza</h2>
-          <p className="text-xs text-hpa-slate-5 mt-0.5">{pagination.total || 0} casos activos</p>
+          <h2 className="text-xl font-bold text-hpa-slate-9">Módulo de Cobranza</h2>
+          <p className="text-xs text-hpa-slate-5 mt-0.5">Gestión de recaudación y aplicación de amortizaciones en tiempo real</p>
         </div>
-      </div>
-
-      {/* Stage summary */}
-      <div className="grid grid-cols-5 gap-3">
-        {Object.entries(STAGE_LABELS).map(([key, label]) => (
-          <button key={key}
-            className={`card p-3 text-center cursor-pointer transition-all border-2 ${stage === key ? 'border-hpa-700' : 'border-transparent'} hover:border-hpa-700/30`}
-            onClick={() => setStage(stage === key ? '' : key)}>
-            <p className="text-xs text-hpa-slate-5 font-medium">{label}</p>
-            <p className="text-xl font-bold text-hpa-slate-9 mt-1 font-numeric">—</p>
-          </button>
-        ))}
-      </div>
-
-      {/* Table */}
-      <div className="card p-0 overflow-hidden">
-        <div className="p-4 border-b border-hpa-slate-2 flex gap-3">
-          <select className="select w-44" value={stage} onChange={e => { setStage(e.target.value); setPage(1) }}>
-            <option value="">Todas las etapas</option>
-            {Object.entries(STAGE_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-        </div>
-        <div className="table-wrapper">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Préstamo</th><th>Cliente</th><th>Etapa</th><th>Días Mora</th>
-                <th>Monto Vencido</th><th>Cuotas</th><th>Asignado a</th>
-                <th>Próx. Acción</th><th>Estado</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={10} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
-              ) : cases.length === 0 ? (
-                <tr><td colSpan={10}>
-                  <Empty icon={PhoneCall} title="Sin casos de cobranza" desc="No hay casos activos con estos filtros" />
-                </td></tr>
-              ) : cases.map(c => (
-                <tr key={c.id}>
-                  <td className="font-mono text-xs font-semibold text-hpa-700">{c.loans?.loan_code}</td>
-                  <td>
-                    <p className="font-medium">{c.clients?.first_name} {c.clients?.last_name}</p>
-                    <p className="text-xs text-hpa-slate-5">{c.clients?.phone_primary}</p>
-                  </td>
-                  <td><span className={`badge ${STAGE_COLORS[c.stage]||'badge-gray'}`}>{STAGE_LABELS[c.stage]||c.stage}</span></td>
-                  <td>
-                    <span className={`font-bold font-numeric ${c.days_overdue > 90 ? 'text-red-600' : c.days_overdue > 30 ? 'text-amber-600' : 'text-hpa-slate-7'}`}>
-                      {c.days_overdue}d
-                    </span>
-                  </td>
-                  <td className="font-numeric font-semibold text-red-600">{fmt(c.amount_overdue)}</td>
-                  <td className="font-numeric">{c.installments_due}</td>
-                  <td className="text-xs">{c.profiles?.full_name || '—'}</td>
-                  <td className="text-xs text-hpa-slate-5">{fmtDate(c.next_action_at)}</td>
-                  <td><StatusBadge status={c.status} /></td>
-                  <td>
-                    <button className="btn btn-ghost btn-sm" onClick={() => { setShowAction(c); setActionForm({}) }}>
-                      <PhoneCall size={12} /> Acción
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <Pagination page={page} pages={pagination.pages} total={pagination.total} limit={20} onChange={setPage} />
-      </div>
-
-      {/* Action modal */}
-      <Modal open={!!showAction} onClose={() => setShowAction(null)} title="Registrar Acción de Cobranza"
-        footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => setShowAction(null)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={saveAction} disabled={saving}>
-              {saving ? <Spinner size={14} /> : 'Guardar Acción'}
-            </button>
-          </>
-        }>
-        {showAction && (
-          <div className="space-y-4">
-            <div className="p-3 bg-hpa-slate-1 rounded-lg text-sm">
-              <p className="font-semibold">{showAction.clients?.first_name} {showAction.clients?.last_name}</p>
-              <p className="text-hpa-slate-5 text-xs">{showAction.days_overdue} días en mora · {fmt(showAction.amount_overdue)} vencido</p>
-            </div>
-            <div className="form-row">
-              <Field label="Tipo de acción">
-                <select className="select" value={actionForm.type||''} onChange={e=>setActionForm(f=>({...f,type:e.target.value}))}>
-                  <option value="">Seleccionar...</option>
-                  {['call','visit','message','email','notice','agreement','other'].map(t=><option key={t}>{t}</option>)}
-                </select>
-              </Field>
-              <Field label="Resultado">
-                <select className="select" value={actionForm.result||''} onChange={e=>setActionForm(f=>({...f,result:e.target.value}))}>
-                  <option value="">Seleccionar...</option>
-                  {['contact','no_contact','promise','paid','refused','rescheduled','other'].map(r=><option key={r}>{r}</option>)}
-                </select>
-              </Field>
-            </div>
-            <Field label="Notas" required>
-              <textarea className="input h-24 resize-none" value={actionForm.notes||''}
-                onChange={e=>setActionForm(f=>({...f,notes:e.target.value}))} />
-            </Field>
-            <div className="form-row">
-              <Field label="Próxima acción">
-                <input className="input" value={actionForm.next_action||''} onChange={e=>setActionForm(f=>({...f,next_action:e.target.value}))} />
-              </Field>
-              <Field label="Fecha próx. acción">
-                <input className="input" type="date" value={actionForm.next_action_date||''} onChange={e=>setActionForm(f=>({...f,next_action_date:e.target.value}))} />
-              </Field>
-            </div>
+        
+        {checkingSession ? (
+          <Spinner size={16} />
+        ) : activeSession ? (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-bold">
+            <CheckCircle2 size={14} /> Caja Abierta (Sesión Activa)
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-xs font-bold">
+            <AlertCircle size={14} /> Requiere Apertura de Caja para Cobrar
           </div>
         )}
-      </Modal>
-    </div>
-  )
-}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* PANEL IZQUIERDO: Buscador e historial de préstamos vivos */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="card p-4">
+            <p className="text-xs font-bold text-hpa-slate-7 mb-2 uppercase tracking-wider">Buscar Cartera Activa</p>
+            <form onSubmit={searchLoans} className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-2.5 text-hpa-slate-4" size={16} />
+                <input
+                  type="text"
+                  placeholder="Ej: HPA-LN-001..."
+                  className="input pl-9"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <button type="submit" className="btn btn-primary btn-sm h-full" disabled={loading}>
+                {loading ? <Spinner size={14} /> : 'Filtrar'}
+              </button>
+            </form>
+          </div>
+
+          <div className="card p-0 overflow-hidden">
+            <div className="p-3 bg-hpa-slate-1 border-b border-hpa-slate-2">
+              <p className="text-xs font-bold text-hpa-slate-6">Cuentas con Balance Pendiente</p>
+            </div>
+            
+            <div className="divide-y divide-hpa-slate-2 max-h-[500px] overflow-y-auto">
+              {loading ? (
+                <div className="p-8 text-center"><Spinner size={20} className="mx-auto" /></div>
+              ) : activeLoans.length === 0 ? (
+                <div className="p-6 text-center text-xs text-hpa-slate-4">No se encontraron cuentas activas.</div>
+              ) : activeLoans.map(loan => (
+                <div 
+                  key={loan.id}
+                  onClick={() => loadLoanDetails(loan)}
+                  className={`p-3 text-xs cursor-pointer transition-colors flex items-center justify-between ${selectedLoan?.id === loan.id ? 'bg-hpa-slate-2 border-l-4 border-hpa-700' : 'hover:bg-hpa-slate-1'}`}
+                >
+                  <div>
+                    <p className="font-mono font-bold text-hpa-700">{loan.loan_code}</p>
+                    <p className="font-medium mt-0.5 text-hpa-slate-8">{loan.clients?.first_name} {loan.clients?.last_name}</p>
+                    <p className="text-[10px] text-hpa-slate-4 mt-0.5">Mora: {loan.days_overdue || 0} días</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-hpa-slate-9 font-numeric">{fmt(loan.balance_total, loan.currency)}</p>
+                    <span className="inline-block mt-1 scale-90"><StatusBadge status={loan.status} /></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* PANEL DERECHO: Detalle del plan de pagos y amortización */}
+        <div className="lg:col-span-7">
+          {selectedLoan ? (
+            <div className="space-y-4 animate-fade-in">
+              {/* Card Resumen de Saldos del Préstamo */}
+              <div className="card p-4 bg-hpa-slate-9 text-white border-0 grid grid-cols-3 gap-2 text-center">
+                <div className="border-r border-white/10">
+                  <p className="text-[10px] text-white/60 uppercase">Capital Pendiente</p>
+                  <p className="text-sm font-bold font-numeric mt-0.5">{fmt(selectedLoan.balance_principal, selectedLoan.currency)}</p>
+                </div>
+                <div className="border-r border-white/10">
+                  <p className="text-[10px] text-white/60 uppercase">Interés Acumulado</p>
+                  <p className="text-sm font-bold font-numeric mt-0.5">{fmt(selectedLoan.balance_interest, selectedLoan.currency)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-white/60 uppercase text-amber-300">Mora / Penalidad</p>
+                  <p className="text-sm font-bold font-numeric mt-0.5 text-amber-300">{fmt(selectedLoan.balance_penalties, selectedLoan.currency)}</p>
+                </div>
+              </div>
+
+              {/* Detalle del Calendario de Cuotas */}
+              <div className="card p-0">
+                <div className="p-4 border-b border-hpa-slate-2 flex justify-between items-center">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-hpa-slate-7">Calendario de Amortización</h3>
+                    <p className="text-[11px] text-hpa-slate-4 mt-0.5">Historial estructurado y vencimientos de cuotas</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] font-semibold text-hpa-slate-7">Balance Total Exigible</p>
+                    <p className="text-sm font-bold text-hpa-700 font-numeric">{fmt(selectedLoan.balance_total, selectedLoan.currency)}</p>
+                  </div>
+                </div>
+
+                <div className="table-wrapper max-h-[450px] overflow-y-auto">
+                  <table className="table text-xs">
+                    <thead>
+                      <tr>
+                        <th>Cuota</th>
+                        <th>Vencimiento</th>
+                        <th>Monto Cuota</th>
+                        <th>Pagado</th>
+                        <th>Pendiente</th>
+                        <th>Estado</th>
+                        <th className="text-center">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loadingSchedule ? (
+                        <tr><td colSpan={7} className="py-12 text-center"><Spinner size={16} className="mx-auto" /></td></tr>
+                      ) : schedule.map(inst => (
+                        <tr key={inst.id} className={inst.status === 'paid' ? 'bg-emerald-50/40 text-hpa-slate-4' : inst.days_overdue > 0 ? 'bg-red-50/40' : ''}>
+                          <td className="font-bold">#{inst.installment_num}</td>
+                          <td>{fmtDate(inst.due_date)}</td>
+                          <td className="font-numeric">{fmt(inst.total_due, selectedLoan.currency)}</td>
+                          <td className="text-emerald-600 font-numeric">{fmt(inst.total_paid || 0, selectedLoan.currency)}</td>
+                          <td className="font-bold font-numeric">{fmt(inst.balance ?? inst.total_due, selectedLoan.currency)}</td>
+                          <td>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${inst.status === 'paid' ? 'bg-emerald-100 text-emerald-800' : inst.status === 'partial' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>
+                              {inst.status === 'paid' ? 'PAGADO' : inst.status === 'partial' ? 'ABONADO' : 'PENDIENTE'}
+                            </span>
+                          </td>
+                          <td className="text-center">
+                            {inst.status !== 'paid' ? (
+                              <button 
+                                onClick={() => openPaymentModal(inst)}
+                                className="btn btn-primary px-2 py-1 text-[10px] font-bold rounded flex items-center gap-1 mx-auto"
+                              >
+                                <DollarSign size={10} /> Cobrar
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-emerald-600 font-bold">Completo ✓</span>
+                            )}
