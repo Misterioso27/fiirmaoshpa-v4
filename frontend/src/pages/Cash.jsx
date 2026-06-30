@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { DollarSign, ArrowUpRight, ArrowDownLeft, Lock, Unlock, ClipboardList, RefreshCw } from 'lucide-react'
+import { DollarSign, Lock, Unlock, ClipboardList, RefreshCw } from 'lucide-react'
 import { supabase, fmt, fmtDate } from '@/lib/supabase'
 import { Field, Spinner, Empty } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -185,19 +185,4 @@ function Cash() {
             </Field>
 
             <button type="submit" className="btn btn-primary w-full flex items-center justify-center gap-2" disabled={submitting}>
-              {submitting ? <Spinner size={14} /> : <><Unlock size={14} /> Inicializar Sesión de Caja</>}
-            </button>
-          </form>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          <div className="lg:col-span-4 space-y-4">
-            <div className="card p-5 bg-hpa-slate-9 text-white border-0 space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-white/60 uppercase">Estatus de Sesión</p>
-                <h3 className="text-base font-bold mt-0.5">Sesión Abierta por el Usuario</h3>
-              </div>
-              <hr className="border-white/10" />
-              <div>
-                <p className="text-[11px] text-white/60 uppercase">Fondo de Apertura</p>
-                <p className="text-sm font-medium font-numeric">{fmt(activeSession.opening_balance)}</p>
+              {submitting ? <Spinner size={14} /> : <><Unlock size={14}
