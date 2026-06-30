@@ -22,11 +22,15 @@ function Cash() {
   const loadRegisters = useCallback(async () => {
     try {
       let query = supabase.from('cash_registers').select('*')
-      if (branchId) query = query.eq('branch_id', branchId)
+      if (branchId) {
+        query = query.eq('branch_id', branchId)
+      }
       const { data, error } = await query
       if (error) throw error
       setRegisters(data || [])
-      if (data?.length > 0) setSelectedRegister(data[0].id)
+      if (data?.length > 0) {
+        setSelectedRegister(data[0].id)
+      }
     } catch (err) {
       console.error('Error cargando cajas:', err.message)
     }
@@ -70,7 +74,9 @@ function Cash() {
 
   useEffect(() => {
     loadRegisters()
-    if (user?.id) checkActiveSession()
+    if (user?.id) {
+      checkActiveSession()
+    }
   }, [user?.id, loadRegisters, checkActiveSession])
 
   const handleOpenSession = async (e) => {
@@ -87,6 +93,7 @@ function Cash() {
         .from('cash_sessions')
         .insert([{
           company_id: companyId || null,
+          branch_id: branchId || null,
           user_id: user.id,
           opening_balance: monto,
           current_balance: monto,
@@ -228,29 +235,3 @@ function Cash() {
                   <tbody>
                     {movements.length === 0 ? (
                       <tr><td colSpan={4} className="py-12"><Empty icon={ClipboardList} title="Sin movimientos" desc="No hay transacciones todavía." /></td></tr>
-                    ) : movements.map(mov => (
-                      <tr key={mov.id}>
-                        <td className="text-hpa-slate-4">{fmtDate(mov.created_at)}</td>
-                        <td>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${mov.type === 'income' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
-                            {mov.type === 'income' ? 'ENTRADA' : 'SALIDA'}
-                          </span>
-                        </td>
-                        <td className="font-medium text-hpa-slate-8">{mov.description}</td>
-                        <td className={`text-right font-bold font-numeric ${mov.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {mov.type === 'income' ? '+' : '-'}{fmt(mov.amount)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-export default Cash
