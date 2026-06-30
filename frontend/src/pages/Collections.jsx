@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, DollarSign, Calendar, Receipt, AlertCircle, CheckCircle2, FileText, ArrowRight } from 'lucide-react'
+import { Search, DollarSign, Receipt, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Spinner, Empty } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -7,7 +7,6 @@ import useAuthStore from '@/store/auth'
 function Collections() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id
-  const branchId  = user?.branch?.id
 
   // Estados de carga y datos
   const [loading, setLoading] = useState(false)
@@ -60,7 +59,6 @@ function Collections() {
     if (!companyId) return
     setLoading(true)
     try {
-      // Buscamos préstamos cuyo estado requiera gestión de cobro
       let query = supabase
         .from('loans')
         .select(`
@@ -72,7 +70,6 @@ function Collections() {
         .in('status', ['active', 'overdue', 'defaulted'])
 
       if (searchTerm.trim()) {
-        // Filtro básico por código de préstamo
         query = query.ilike('loan_code', `%${searchTerm}%`)
       }
 
@@ -85,10 +82,9 @@ function Collections() {
     setLoading(false)
   }
 
-  // Cargar lista inicial al montar
   useEffect(() => { if (companyId) searchLoans() }, [companyId])
 
-  // 3. Cargar el Calendario de Cuotas de un Préstamo Seleccionado
+  // 3. Cargar el Calendario de Cuotas
   const loadLoanDetails = async (loan) => {
     setSelectedLoan(loan)
     setLoadingSchedule(true)
@@ -107,10 +103,8 @@ function Collections() {
     setLoadingSchedule(false)
   }
 
-  // 4. Abrir Modal para aplicar cobro a una cuota específica
   const openPaymentModal = (installment) => {
     setSelectedInstallment(installment)
-    // Autorellenar con el balance pendiente de esa cuota específica
     setPaymentForm({
       amount: installment.balance || installment.total_due,
       payment_method: 'cash',
@@ -120,7 +114,7 @@ function Collections() {
     setShowPaymentModal(true)
   }
 
-  // 5. Procesar e Inserción de Pago con Distribución Contable Correcta
+  // 4. Procesar e Inserción de Pago con Distribución Contable Correcta
   const handleApplyPayment = async () => {
     if (!activeSession) {
       alert('Error: Debe abrir una sesión de caja antes de recibir pagos.')
@@ -135,28 +129,22 @@ function Collections() {
 
     setSubmittingPayment(true)
     try {
-      // Lógica de Amortización: Distribuir el dinero según prioridades estándar
       let restante = montoAPagar
       
-      // A. Penalidades / Mora pendientes en la cuota
       const moraPendiente = parseFloat(selectedInstallment.penalty_amount || 0) - parseFloat(selectedInstallment.penalty_paid || 0)
       const penaltyApplied = Math.min(restante, Math.max(0, moraPendiente))
       restante -= penaltyApplied
 
-      // B. Intereses pendientes en la cuota
       const interesPendiente = parseFloat(selectedInstallment.interest || 0) - parseFloat(selectedInstallment.interest_paid || 0)
       const interestApplied = Math.min(restante, Math.max(0, interesPendiente))
       restante -= interestApplied
 
-      // C. Capital pendiente en la cuota
       const capitalPendiente = parseFloat(selectedInstallment.principal || 0) - parseFloat(selectedInstallment.principal_paid || 0)
       const principalApplied = Math.min(restante, Math.max(0, capitalPendiente))
       restante -= principalApplied
 
-      // Generar el correlativo o número de recibo de pago temporal
       const numRecibo = `REC-${Date.now().toString().slice(-6)}`
 
-      // 1. Insertar el recibo en 'loan_payments'
       const { error: payErr } = await supabase
         .from('loan_payments')
         .insert([{
@@ -178,14 +166,12 @@ function Collections() {
 
       if (payErr) throw payErr
 
-      // 2. Actualizar la cuota específica en 'loan_schedule'
       const nuevoPrincipalPaid = parseFloat(selectedInstallment.principal_paid || 0) + principalApplied
       const nuevoInterestPaid  = parseFloat(selectedInstallment.interest_paid || 0) + interestApplied
       const nuevoPenaltyPaid   = parseFloat(selectedInstallment.penalty_paid || 0) + penaltyApplied
       const nuevoTotalPaid     = parseFloat(selectedInstallment.total_paid || 0) + montoAPagar
       const nuevoBalance       = Math.max(0, parseFloat(selectedInstallment.total_due) - nuevoTotalPaid)
       
-      // Determinar el nuevo estado de la cuota
       const nuevoStatus = nuevoBalance <= 0 ? 'paid' : 'partial'
 
       const { error: schedErr } = await supabase
@@ -203,7 +189,6 @@ function Collections() {
 
       if (schedErr) throw schedErr
 
-      // 3. Afectar los saldos globales del préstamo en la tabla 'loans'
       const nuevoLoanBalPrincipal = Math.max(0, parseFloat(selectedLoan.balance_principal) - principalApplied)
       const nuevoLoanBalInterest  = Math.max(0, parseFloat(selectedLoan.balance_interest) - interestApplied)
       const nuevoLoanBalPenalties = Math.max(0, parseFloat(selectedLoan.balance_penalties) - penaltyApplied)
@@ -224,9 +209,7 @@ function Collections() {
 
       if (loanErr) throw loanErr
 
-      // Todo correcto: Refrescar interfaz de inmediato
       setShowPaymentModal(false)
-      // Actualizar el préstamo en memoria para mantener consistencia visual
       const updatedLoan = {
         ...selectedLoan,
         balance_principal: nuevoLoanBalPrincipal,
@@ -248,7 +231,6 @@ function Collections() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Barra superior informativa de Caja */}
       <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-hpa-slate-2 shadow-sm">
         <div>
           <h2 className="text-xl font-bold text-hpa-slate-9">Módulo de Cobranza</h2>
@@ -269,7 +251,6 @@ function Collections() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* PANEL IZQUIERDO: Buscador e historial de préstamos vivos */}
         <div className="lg:col-span-5 space-y-4">
           <div className="card p-4">
             <p className="text-xs font-bold text-hpa-slate-7 mb-2 uppercase tracking-wider">Buscar Cartera Activa</p>
@@ -321,11 +302,9 @@ function Collections() {
           </div>
         </div>
 
-        {/* PANEL DERECHO: Detalle del plan de pagos y amortización */}
         <div className="lg:col-span-7">
           {selectedLoan ? (
             <div className="space-y-4 animate-fade-in">
-              {/* Card Resumen de Saldos del Préstamo */}
               <div className="card p-4 bg-hpa-slate-9 text-white border-0 grid grid-cols-3 gap-2 text-center">
                 <div className="border-r border-white/10">
                   <p className="text-[10px] text-white/60 uppercase">Capital Pendiente</p>
@@ -341,7 +320,6 @@ function Collections() {
                 </div>
               </div>
 
-              {/* Detalle del Calendario de Cuotas */}
               <div className="card p-0">
                 <div className="p-4 border-b border-hpa-slate-2 flex justify-between items-center">
                   <div>
@@ -393,3 +371,105 @@ function Collections() {
                             ) : (
                               <span className="text-[10px] text-emerald-600 font-bold">Completo ✓</span>
                             )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="card py-16">
+              <Empty 
+                icon={Receipt} 
+                title="Ningún préstamo seleccionado" 
+                desc="Seleccione una cuenta de la cartera activa en el panel de la izquierda para desplegar y procesar su cobranza." 
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Modal
+        open={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        title={`Aplicar Cobro — Cuota #${selectedInstallment?.installment_num}`}
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setShowPaymentModal(false)}>Cancelar</button>
+            <button 
+              className="btn btn-primary" 
+              onClick={handleApplyPayment}
+              disabled={submittingPayment || !activeSession}
+            >
+              {submittingPayment ? <Spinner size={14} /> : 'Procesar e Imprimir Recibo'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="bg-hpa-slate-1 p-3 rounded-xl border border-hpa-slate-2 text-xs space-y-1">
+            <div className="flex justify-between">
+              <span className="text-hpa-slate-5">Monto original pactado:</span>
+              <span className="font-bold font-numeric">{fmt(selectedInstallment?.total_due, selectedLoan?.currency)}</span>
+            </div>
+            <div className="flex justify-between text-emerald-600">
+              <span>Total ya abonado a esta cuota:</span>
+              <span className="font-bold font-numeric">-{fmt(selectedInstallment?.total_paid || 0, selectedLoan?.currency)}</span>
+            </div>
+            <div className="flex justify-between border-t border-hpa-slate-3 pt-1 font-bold text-sm text-hpa-700">
+              <span>Balance Neto Exigible:</span>
+              <span className="font-numeric">{fmt(selectedInstallment?.balance ?? selectedInstallment?.total_due, selectedLoan?.currency)}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Monto Recibido (RD$)" required>
+              <input 
+                type="number" 
+                className="input font-bold" 
+                placeholder="0.00"
+                value={paymentForm.amount}
+                onChange={e => setPaymentForm(p => ({ ...p, amount: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Método de Pago" required>
+              <select 
+                className="select" 
+                value={paymentForm.payment_method}
+                onChange={e => setPaymentForm(p => ({ ...p, payment_method: e.target.value }))}
+              >
+                <option value="cash">Efectivo</option>
+                <option value="bank_transfer">Transferencia Bancaria</option>
+                <option value="deposit">Depósito por Ventanilla</option>
+              </select>
+            </Field>
+          </div>
+
+          <Field label="Referencia de Transacción (Opcional)">
+            <input 
+              type="text" 
+              className="input" 
+              placeholder="Ej: Número de aprobación o transferencia..."
+              value={paymentForm.reference}
+              onChange={e => setPaymentForm(p => ({ ...p, reference: e.target.value }))}
+            />
+          </Field>
+
+          <Field label="Notas del Recibo">
+            <textarea 
+              className="input h-16 resize-none" 
+              placeholder="Detalles adicionales del pago..."
+              value={paymentForm.notes}
+              onChange={e => setPaymentForm(p => ({ ...p, notes: e.target.value }))}
+            />
+          </Field>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+export default Collections
