@@ -4,7 +4,6 @@ import { supabase, fmt, fmtDate } from '@/lib/supabase'
 import { Field, Spinner, Empty } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
-// 1. COMPONENTE AUXILIAR PARA LA TABLA DE MOVIMIENTOS
 function MovementsTable({ movements }) {
   if (movements.length === 0) {
     return (
@@ -46,7 +45,6 @@ function MovementsTable({ movements }) {
   )
 }
 
-// 2. COMPONENTE PRINCIPAL
 function Cash() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id
@@ -121,6 +119,11 @@ function Cash() {
       alert('Por favor ingrese un monto de apertura válido.')
       return
     }
+    if (!selectedRegister) {
+      alert('Por favor seleccione una terminal o caja física.')
+      return
+    }
+
     setSubmitting(true)
     try {
       const { data, error } = await supabase
@@ -128,6 +131,7 @@ function Cash() {
         .insert([{
           company_id: companyId || null,
           branch_id: branchId || null,
+          register_id: selectedRegister, // <--- INGREDIENTE CRÍTICO AGREGADO
           user_id: user.id,
           opening_balance: monto,
           current_balance: monto,
@@ -137,9 +141,12 @@ function Cash() {
         .select().single()
 
       if (error) throw error
-      if (selectedRegister) {
-        await supabase.from('cash_registers').update({ status: 'open', current_balance: monto }).eq('id', selectedRegister)
-      }
+      
+      await supabase
+        .from('cash_registers')
+        .update({ status: 'open', current_balance: monto })
+        .eq('id', selectedRegister)
+
       alert('¡Caja abierta con éxito!')
       setOpeningBalance('')
       checkActiveSession()
@@ -186,9 +193,13 @@ function Cash() {
           <form onSubmit={handleOpenSession} className="space-y-4">
             <Field label="Seleccionar Terminal / Caja Física" required>
               <select className="select" value={selectedRegister} onChange={e => setSelectedRegister(e.target.value)}>
-                {registers.length === 0 ? <option value="">Caja General Autodetectada</option> : registers.map(reg => (
-                  <option key={reg.id} value={reg.id}>{reg.name} — {fmt(reg.current_balance)}</option>
-                ))}
+                {registers.length === 0 ? (
+                  <option value="">No hay cajas configuradas en esta sucursal</option>
+                ) : (
+                  registers.map(reg => (
+                    <option key={reg.id} value={reg.id}>{reg.name} — {fmt(reg.current_balance)}</option>
+                  ))
+                )}
               </select>
             </Field>
             <Field label="Monto de Apertura" required>
