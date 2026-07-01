@@ -63,8 +63,15 @@ export default function Cash() {
       const nextNum = (history?.length || 0) + 1
 
       const { error } = await supabase.from('cash_sessions').insert([{
-        company_id: companyId || null, branch_id: branchId || null, register_id: selectedRegister,
-        user_id: user.id, session_number: nextNum.toString(), opening_balance: monto, current_balance: monto, status: 'open'
+        company_id: companyId || null, 
+        branch_id: branchId || null, 
+        register_id: selectedRegister,
+        user_id: user.id, 
+        opened_by: user.id, // <--- CAMPO CRÍTICO REQUERIDO POR TU BASE DE DATOS
+        session_number: nextNum.toString(), 
+        opening_balance: monto, 
+        current_balance: monto, 
+        status: 'open'
       }])
       if (error) throw error
       await supabase.from('cash_registers').update({ status: 'open', current_balance: monto }).eq('id', selectedRegister)
