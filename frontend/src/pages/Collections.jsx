@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, DollarSign, User, FileText, CheckCircle, AlertCircle } from 'lucide-react'
+import { Search, DollarSign, User, FileText, AlertCircle, RefreshCw } from 'lucide-react'
 import { supabase, fmt, fmtDate } from '@/lib/supabase'
 import { Field, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -35,43 +35,61 @@ export default function Collections() {
 
   useEffect(() => { checkSession() }, [checkSession])
 
-  // 2. Buscar préstamos/carteras activas de forma inteligente
+  // 2. Buscar préstamos/carteras activas de forma tolerante a fallos
   const handleSearch = async (e) => {
     if (e) e.preventDefault()
-    if (!searchQuery.trim()) return
-
+    
     setSearching(true)
     setSelectedLoan(null)
     try {
-      // Traemos los préstamos que no estén totalmente saldados, uniendo datos del cliente
-      let query = supabase
-        .from('loans')
-        .select(`
-          *,
-          customers!inner (id, first_name, last_name, id_number)
-        `)
-        .neq('status', 'paid')
+      // Intentamos traer los préstamos activos de la sucursal de forma directa y limpia
+      let loansQuery = supabase.from('loans').select('*').neq('status', 'paid')
+      if (branchId) loansQuery = loansQuery.eq('branch_id', branchId)
+      
+      const { data: rawLoans, error: loanErr } = await loansQuery
+      if (loanErr) throw loanErr
 
-      if (branchId) query = query.eq('branch_id', branchId)
+      // Traemos los clientes de forma independiente para cruzarlos en memoria (así evitamos errores de relación/join)
+      const { data: rawCustomers } = await supabase.from('customers').select('*')
+      const customersMap = (rawCustomers || []).reduce((acc, curr) => {
+        acc[curr.id] = curr
+        return acc
+      }, {})
 
-      const { data, error } = await query
-      if (error) throw error
+      // Cruzamos la información asignando el cliente correspondiente a cada préstamo
+      const enrichedLoans = (rawLoans || []).map(loan => ({
+        ...loan,
+        customerData: customersMap[loan.customer_id] || { first_name: 'Cliente', last_name: 'No Vinculado', id_number: '' }
+      }))
 
-      // Filtrado dinámico en cliente para máxima flexibilidad (código, nombre o cédula)
-      const matches = (data || []).filter(loan => {
-        const term = searchQuery.toLowerCase()
-        const loanCode = (loan.loan_code || '').toLowerCase()
-        const fullName = `${loan.customers?.first_name || ''} ${loan.customers?.last_name || ''}`.toLowerCase()
-        const docId = (loan.customers?.id_number || '').toLowerCase()
-        return loanCode.includes(term) || fullName.includes(term) || docId.includes(term)
-      })
+      // Si no hay texto de búsqueda, mostramos todos los préstamos pendientes
+      if (!searchQuery.trim()) {
+        setLoans(enrichedLoans)
+      } else {
+        // Filtrado exhaustivo y dinámico por cualquier coincidencia
+        const term = searchQuery.toLowerCase().trim()
+        const matches = enrichedLoans.filter(loan => {
+          const loanCode = (loan.loan_code || '').toLowerCase()
+          const firstName = (loan.customerData?.first_name || '').toLowerCase()
+          const lastName = (loan.customerData?.last_name || '').toLowerCase()
+          const fullName = `${firstName} ${lastName}`
+          const docId = (loan.customerData?.id_number || '').toLowerCase()
 
-      setLoans(matches)
+          return loanCode.includes(term) || firstName.includes(term) || lastName.includes(term) || fullName.includes(term) || docId.includes(term)
+        })
+        setLoans(matches)
+      }
     } catch (err) {
-      console.error('Error en búsqueda de cobranza:', err.message)
+      console.error('Error crítico en cobranza:', err.message)
+      alert('Error en búsqueda: ' + err.message)
     }
     setSearching(false)
   }
+
+  // Cargar lista inicial al montar el componente
+  useEffect(() => {
+    handleSearch()
+  }, [branchId])
 
   // 3. Registrar el cobro/amortización
   const handleProcessPayment = async (e) => {
@@ -98,7 +116,7 @@ export default function Collections() {
         .update({ current_balance: newSessionBalance })
         .eq('id', activeSession.id)
 
-      // C. Actualizar también la terminal física vinculada
+      // C. Actualizar la terminal física vinculada
       if (activeSession.register_id) {
         const { data: reg } = await supabase.from('cash_registers').select('current_balance').eq('id', activeSession.register_id).single()
         const newRegBalance = (parseFloat(reg?.current_balance) || 0) + paymentAmount
@@ -118,9 +136,9 @@ export default function Collections() {
       alert('¡Cobro procesado con éxito y caja actualizada!')
       setAmountToPay('')
       setSelectedLoan(null)
-      setLoans([])
       setSearchQuery('')
       checkSession()
+      handleSearch()
     } catch (err) {
       alert('Error al procesar cobro: ' + err.message)
     }
@@ -130,7 +148,7 @@ export default function Collections() {
   if (loadingSession) return <div className="p-12 text-center"><Spinner size={24} className="mx-auto" /></div>
 
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="space-y-5">
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-xl font-bold text-hpa-slate-9">Módulo de Cobranza</h2>
@@ -159,13 +177,13 @@ export default function Collections() {
                 <input
                   type="text"
                   className="input pl-9"
-                  placeholder="Buscar código cartera o cliente..."
+                  placeholder="Buscar código o nombre cliente..."
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                 />
               </div>
-              <button type="submit" className="btn btn-secondary px-4 text-xs font-bold" disabled={searching}>
-                {searching ? <Spinner size={12} /> : 'Filtrar'}
+              <button type="submit" className="btn btn-secondary px-4 text-xs font-bold flex items-center gap-1" disabled={searching}>
+                {searching ? <RefreshCw size={12} className="animate-spin" /> : 'Filtrar'}
               </button>
             </form>
           </div>
@@ -177,7 +195,7 @@ export default function Collections() {
                 No se encontraron cuentas activas con el criterio ingresado.
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
                 {loans.map(loan => (
                   <div
                     key={loan.id}
@@ -185,7 +203,7 @@ export default function Collections() {
                     className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${selectedLoan?.id === loan.id ? 'bg-hpa-slate-9 text-white border-hpa-slate-9 shadow-md' : 'bg-white border-hpa-slate-2 hover:bg-hpa-slate-1'}`}
                   >
                     <p className="text-xs font-bold font-numeric">{loan.loan_code}</p>
-                    <p className="text-sm font-medium">{loan.customers?.first_name} {loan.customers?.last_name}</p>
+                    <p className="text-sm font-medium">{loan.customerData?.first_name} {loan.customerData?.last_name}</p>
                     <p className={`text-xs mt-1 font-bold font-numeric ${selectedLoan?.id === loan.id ? 'text-emerald-300' : 'text-emerald-600'}`}>
                       Balance: {fmt(loan.outstanding_balance || loan.amount)}
                     </p>
@@ -209,8 +227,8 @@ export default function Collections() {
               <div className="border-b border-hpa-slate-2 pb-4 flex justify-between items-start">
                 <div>
                   <span className="text-[10px] font-bold bg-hpa-slate-2 text-hpa-slate-8 px-2 py-0.5 rounded uppercase font-numeric">{selectedLoan.loan_code}</span>
-                  <h3 className="text-base font-bold text-hpa-slate-9 mt-1">{selectedLoan.customers?.first_name} {selectedLoan.customers?.last_name}</h3>
-                  <p className="text-xs text-hpa-slate-4 flex items-center gap-1 mt-0.5"><FileText size={12} /> Doc: {selectedLoan.customers?.id_number || 'N/A'}</p>
+                  <h3 className="text-base font-bold text-hpa-slate-9 mt-1">{selectedLoan.customerData?.first_name} {selectedLoan.customerData?.last_name}</h3>
+                  <p className="text-xs text-hpa-slate-4 flex items-center gap-1 mt-0.5"><FileText size={12} /> Doc: {selectedLoan.customerData?.id_number || 'N/A'}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[11px] text-hpa-slate-4 uppercase">Balance Pendiente</p>
