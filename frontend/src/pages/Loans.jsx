@@ -69,8 +69,8 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
 
 export default function Loans() {
   const { user } = useAuthStore()
-  const companyId = user?.company?.id
-  const branchId  = user?.branch?.id
+const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+  const branchId  = user?.branch?.id  || 'b0000000-0000-4000-8000-000000000001'
 
   const [tab, setTab]           = useState('applications')
   const [items, setItems]       = useState([])
