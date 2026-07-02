@@ -1,173 +1,279 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient'; // Ajusta la ruta según tu proyecto
-import { Search, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react'
+import { Search, DollarSign, User, AlertCircle, RefreshCw } from 'lucide-react'
+import { supabase, fmt } from '@/lib/supabase'
+import { Field, Spinner } from '@/components/ui'
+import useAuthStore from '@/store/auth'
 
 export default function Collections() {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [accounts, setAccounts] = useState([]);
-  const [searched, setSearched] = useState(false);
-  const [cashOpen, setCashOpen] = useState(false);
+  const { user } = useAuthStore()
+  const branchId = user?.branch?.id
 
-  // 1. Verificar si la caja está abierta al cargar la página
-  useEffect(() => {
-    checkCashSession();
-  }, []);
+  const [loadingSession, setLoadingSession] = useState(false)
+  const [activeSession, setActiveSession] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [loans, setLoans] = useState([])
+  const [selectedLoan, setSelectedLoan] = useState(null)
+  const [amountToPay, setAmountToPay] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  async function checkCashSession() {
+  // 1. Validar sesión de caja abierta
+  const checkSession = useCallback(async () => {
+    if (!user?.id) return
+    setLoadingSession(true)
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('cash_sessions')
         .select('*')
         .eq('status', 'open')
-        .maybeSingle();
+        .limit(1)
+      
+      if (data && data.length > 0) {
+        setActiveSession(data[0])
+      } else {
+        setActiveSession(null)
+      }
+    } catch (err) { 
+      console.error('Error en checkSession:', err) 
+    }
+    setLoadingSession(false)
+  }, [user?.id])
 
-      if (error) throw error;
-      setCashOpen(!!data);
+  useEffect(() => { checkSession() }, [checkSession])
+
+  // 2. Buscador blindado apuntando a la tabla 'clients'
+  const handleSearch = async (e) => {
+    if (e) e.preventDefault()
+    
+    setSearching(true)
+    setSelectedLoan(null)
+    try {
+      // Traer préstamos activos
+      const { data: rawLoans, error: loanErr } = await supabase
+        .from('loans')
+        .select('*')
+        .neq('status', 'paid')
+
+      if (loanErr) throw loanErr
+
+      // Traer datos de 'clients' para cruzar la información
+      const { data: rawClients } = await supabase
+        .from('clients')
+        .select('*')
+
+      const clientsMap = (rawClients || []).reduce((acc, curr) => {
+        acc[curr.id] = curr
+        return acc
+      }, {})
+
+      const enrichedLoans = (rawLoans || []).map(loan => {
+        const targetClientId = loan.client_id || loan.customer_id
+        const clientData = clientsMap[targetClientId]
+
+        return {
+          ...loan,
+          customerData: clientData || { 
+            first_name: loan.client_name || 'Cliente', 
+            last_name: loan.client_lastname || 'No Sincronizado'
+          }
+        }
+      })
+
+      // Filtrar según el término del input
+      if (!searchQuery.trim()) {
+        setLoans(enrichedLoans)
+      } else {
+        const term = searchQuery.toLowerCase().trim()
+        const matches = enrichedLoans.filter(loan => {
+          const loanCode = (loan.loan_code || '').toLowerCase()
+          const firstName = (loan.customerData?.first_name || '').toLowerCase()
+          const lastName = (loan.customerData?.last_name || '').toLowerCase()
+          const fullName = `${firstName} ${lastName}`
+
+          return loanCode.includes(term) || firstName.includes(term) || lastName.includes(term) || fullName.includes(term)
+        })
+        setLoans(matches)
+      }
     } catch (err) {
-      console.error('Error al validar sesión de caja:', err);
+      console.error('Error en motor de búsqueda:', err.message)
+    }
+    setSearching(false)
+  }
+
+  useEffect(() => {
+    handleSearch()
+  }, [branchId])
+
+  // Manejar limpieza limpia del input
+  const handleInputChange = (e) => {
+    const value = e.target.value
+    setSearchQuery(value)
+    if (value.trim() === '') {
+      handleSearch()
     }
   }
 
-  // 2. Buscador blindado (Busca por código HPA o por nombre en la tabla correcta)
-  const handleSearch = async (e) => {
-    if (e) e.preventDefault();
-    if (!searchTerm.trim()) return;
+  // 3. Procesar abono
+  const handleProcessPayment = async (e) => {
+    e.preventDefault()
+    const paymentAmount = parseFloat(amountToPay)
+    if (isNaN(paymentAmount) || paymentAmount <= 0) return alert('Ingrese un monto válido')
 
-    setLoading(true);
-    setSearched(true);
-
+    setSubmitting(true)
     try {
-      let query = supabase
-        .from('clients') // Cambiado a la tabla correcta que sí existe
-        .select('*');
+      const currentOutstanding = parseFloat(selectedLoan.outstanding_balance || selectedLoan.amount || 0)
+      const newOutstanding = Math.max(0, currentOutstanding - paymentAmount)
+      const nextStatus = newOutstanding === 0 ? 'paid' : selectedLoan.status
 
-      // Si el término parece un código HPA (ej. HPA-SOL-0002)
-      if (searchTerm.toUpperCase().includes('HPA')) {
-        query = query.ilike('loan_code', `%${searchTerm.trim()}%`);
-      } else {
-        // Si es texto suelto, busca por el nombre del cliente
-        query = query.ilike('full_name', `%${searchTerm.trim()}%`);
+      const { error: updateErr } = await supabase
+        .from('loans')
+        .update({ outstanding_balance: newOutstanding, status: nextStatus })
+        .eq('id', selectedLoan.id)
+
+      if (updateErr) throw updateErr
+
+      if (activeSession) {
+        await supabase.from('cash_movements').insert([{
+          cash_session_id: activeSession.id,
+          type: 'income',
+          amount: paymentAmount,
+          description: `Abono cuota - Cartera: ${selectedLoan.loan_code}`
+        }])
+
+        const newSessionBalance = parseFloat(activeSession.current_balance) + paymentAmount
+        await supabase.from('cash_sessions').update({ current_balance: newSessionBalance }).eq('id', activeSession.id)
       }
 
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setAccounts(data || []);
+      alert('¡Abono aplicado correctamente!')
+      setAmountToPay('')
+      setSelectedLoan(null)
+      setSearchQuery('')
+      checkSession()
+      handleSearch()
     } catch (err) {
-      console.error('Error en la búsqueda de cobranza:', err);
-      setAccounts([]);
-    } finally {
-      setLoading(false);
+      alert('Error al registrar cobro: ' + err.message)
     }
-  };
-
-  // 3. Restablecer el estado si el usuario borra el input manualmente
-  const handleInputChange = (e) => {
-    const value = e.target.value;
-    setSearchTerm(value);
-    if (value.trim() === '') {
-      setAccounts([]);
-      setSearched(false);
-    }
-  };
+    setSubmitting(false)
+  }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      {/* Encabezado y Alerta de Caja */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+    <div className="space-y-5">
+      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Módulo de Cobranza</h1>
-          <p className="text-sm text-gray-500">Gestión de recaudación y aplicación de amortizaciones en tiempo real</p>
+          <h2 className="text-xl font-bold text-gray-900">Módulo de Cobranza</h2>
+          <p className="text-xs text-gray-500">Recaudación y aplicación de amortizaciones en tiempo real</p>
         </div>
-
-        {cashOpen ? (
-          <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg border border-emerald-200 text-sm font-medium">
-            <CheckCircle2 className="w-4 h-4" />
-            Caja Abierta (Sesión Activa)
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-4 py-2 rounded-lg border border-amber-200 text-sm font-medium">
-            <AlertTriangle className="w-4 h-4" />
-            Requiere Apertura de Caja para Cobrar
-          </div>
-        )}
+        <div>
+          {activeSession ? (
+            <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full border border-emerald-300">
+              ✓ Caja Abierta (Sesión Activa)
+            </span>
+          ) : (
+            <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full border border-amber-300">
+              ⚠ Cobro de Contingencia (Sin Caja Abierta)
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Buscador y Resultados */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Panel Izquierdo: Formulario de Búsqueda */}
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 space-y-4 h-fit">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Buscar Cartera Activa</h2>
-          
-          <form onSubmit={handleSearch} className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Ej: HPA-SOL-0002 o Herik"
-                value={searchTerm}
-                onChange={handleInputChange}
-                className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-              />
-            </div>
-            
-            <button
-              type="submit"
-              disabled={loading || !searchTerm.trim()}
-              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 rounded-lg shadow-sm transition-colors flex items-center justify-center min-w-[76px]"
-            >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Filtrar'}
-            </button>
-          </form>
-
-          <hr className="border-gray-100" />
-
-          {/* Lista de Cuentas Encontradas */}
-          <div>
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-              {searched ? 'Cuentas Encontradas' : 'Cuentas con Balance Pendiente'}
-            </h3>
-
-            {loading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <div className="lg:col-span-5 space-y-4">
+          <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+            <form onSubmit={handleSearch} className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+                <input
+                  type="text"
+                  className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Buscar código o nombre cliente..."
+                  value={searchQuery}
+                  onChange={handleInputChange}
+                />
               </div>
-            ) : accounts.length > 0 ? (
-              <div className="space-y-2">
-                {accounts.map((acc) => (
-                  <div 
-                    key={acc.id} 
-                    className="p-3 bg-gray-50 hover:bg-indigo-50/50 border border-gray-200 hover:border-indigo-200 rounded-lg cursor-pointer transition-all"
+              <button 
+                type="submit" 
+                className="px-4 text-xs font-bold bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50 min-w-[76px] flex items-center justify-center"
+                disabled={searching}
+              >
+                {searching ? <RefreshCw size={12} className="animate-spin" /> : 'Filtrar'}
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm min-h-[250px]">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Cuentas Encontradas</p>
+            {loans.length === 0 ? (
+              <div className="text-center py-12 text-xs text-gray-400">
+                No se encontraron cuentas activas con el criterio ingresado.
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {loans.map(loan => (
+                  <div
+                    key={loan.id}
+                    onClick={() => setSelectedLoan(loan)}
+                    className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${selectedLoan?.id === loan.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
                   >
-                    <p className="font-semibold text-sm text-gray-800">{acc.full_name}</p>
-                    <p className="text-xs text-gray-500">{acc.loan_code || 'Sin código activo'}</p>
+                    <p className="text-xs font-bold font-mono">{loan.loan_code}</p>
+                    <p className="text-sm font-medium">{loan.customerData?.first_name} {loan.customerData?.last_name}</p>
+                    <p className={`text-xs mt-1 font-bold font-mono ${selectedLoan?.id === loan.id ? 'text-indigo-200' : 'text-emerald-600'}`}>
+                      Balance: {fmt(loan.outstanding_balance || loan.amount)}
+                    </p>
                   </div>
                 ))}
               </div>
-            ) : searched ? (
-              <p className="text-xs text-center text-gray-400 py-6">
-                No se encontraron cuentas activas con el criterio ingresado.
-              </p>
-            ) : (
-              <p className="text-xs text-center text-gray-400 py-6">
-                Usa el buscador superior para filtrar las cuentas de la cartera.
-              </p>
             )}
           </div>
         </div>
 
-        {/* Panel Derecho: Detalles del préstamo seleccionado (Placeholder) */}
-        <div className="lg:col-span-2 bg-white p-8 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center min-h-[350px]">
-          <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 mb-4">
-            $
-          </div>
-          <h3 className="font-semibold text-gray-700 mb-1">Ningún préstamo seleccionado</h3>
-          <p className="text-xs text-gray-400 max-w-sm">
-            Selecciona una cuenta de la cartera activa en el panel de la izquierda para desplegar y procesar su cobranza.
-          </p>
+        <div className="lg:col-span-7">
+          {!selectedLoan ? (
+            <div className="bg-white border border-dashed border-gray-200 rounded-xl h-full flex flex-col items-center justify-center text-center p-8 min-h-[360px]">
+              <div className="p-4 bg-gray-50 rounded-full text-gray-400 mb-3"><User size={32} /></div>
+              <h4 className="text-sm font-bold text-gray-700">Ningún préstamo seleccionado</h4>
+              <p className="text-xs text-gray-400 max-w-xs mt-1">Seleccione una cuenta en el panel izquierdo para procesar su cobro.</p>
+            </div>
+          ) : (
+            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-6">
+              <div className="border-b border-gray-100 pb-4 flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-bold bg-gray-100 text-gray-800 px-2 py-0.5 rounded uppercase font-mono">{selectedLoan.loan_code}</span>
+                  <h3 className="text-base font-bold text-gray-900 mt-1">{selectedLoan.customerData?.first_name} {selectedLoan.customerData?.last_name}</h3>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] text-gray-400 uppercase">Balance Pendiente</p>
+                  <p className="text-xl font-black text-emerald-600 font-mono">{fmt(selectedLoan.outstanding_balance || selectedLoan.amount)}</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleProcessPayment} className="space-y-4">
+                <Field label="Monto a Recaudar / Abonar" required>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-2.5 text-gray-400" size={16} />
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="w-full pl-9 pr-4 py-2 text-base font-bold bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-emerald-700"
+                      placeholder="0.00"
+                      value={amountToPay}
+                      onChange={e => setAmountToPay(e.target.value)}
+                      disabled={submitting}
+                    />
+                  </div>
+                </Field>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                  disabled={submitting}
+                >
+                  {submitting ? <Spinner size={14} /> : 'Aplicar Amortización'}
+                </button>
+              </form>
+            </div>
+          )}
         </div>
       </div>
     </div>
-  );
+  )
 }
