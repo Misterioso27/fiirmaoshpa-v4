@@ -122,7 +122,7 @@ function Loans() {
       const { data: cls } = await supabase
         .from('clients')
         .select('id, first_name, last_name, client_code')
-        .eq('company_id', companyId)
+        .eq('company_id', companyId || 'a0000000-0000-4000-8000-000000000001')
         .eq('status', 'active')
         .limit(100)
       setClients(cls || [])
