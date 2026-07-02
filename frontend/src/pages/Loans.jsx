@@ -118,19 +118,23 @@ export default function Loans() {
   useEffect(() => { load() }, [load])
 
   async function openNew() {
+    const cid = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
     setForm({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
     setIdDocUrl('')
     setShowSchedule(false)
     setShowModal(true)
-    try {
-      const { data: cls } = await supabase
-        .from('clients')
-        .select('id, first_name, last_name, client_code')
-        .eq('company_id', companyId)
-        .eq('status', 'active')
-        .limit(100)
-      setClients(cls || [])
-    } catch {}
+    async function fetchClients() {
+      try {
+        const { data: cls, error } = await supabase
+          .from('clients')
+          .select('id, first_name, last_name, client_code')
+          .eq('company_id', cid)
+          .eq('status', 'active')
+          .limit(100)
+        if (!error && cls) setClients(cls)
+      } catch {}
+    }
+    fetchClients()
   }
 
   function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
