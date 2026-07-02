@@ -123,7 +123,7 @@ const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
     setIdDocUrl('')
     setShowSchedule(false)
     setShowModal(true)
-    async function fetchClients() {
+async function fetchClients() {
       try {
         const { data: cls, error } = await supabase
           .from('clients')
@@ -131,14 +131,14 @@ const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
           .eq('company_id', cid)
           .eq('status', 'active')
           .limit(100)
+        console.log('CID:', cid, 'CLIENTES:', cls, 'ERROR:', error)
         if (!error && cls) setClients(cls)
-      } catch {}
+      } catch (e) { console.log('CATCH ERROR:', e) }
     }
+    console.log('CID antes fetch:', cid, 'USER company:', user?.company?.id)
     fetchClients()
   }
-
   function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
-
   // Alternar estado de pago de cuota (lógica reductiva)
   function alternarCuota(index) {
     setAnalisis(prev => ({
