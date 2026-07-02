@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, DollarSign, User, RefreshCw } from 'lucide-react'
-import { supabase, fmt, fmtDate } from '@/lib/supabase' // ✅ IMPORTACIÓN CORREGIDA
+import { supabase, fmt, fmtDate } from '@/lib/supabase'
 import { Field, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
