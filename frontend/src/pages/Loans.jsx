@@ -12,6 +12,7 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
   const rm = parseFloat(tasaMensual) / 100
   const tiempo = parseFloat(meses)
 
+  // Mapeo estricto según Excel: Frecuencia × Tiempo
   let totalCuotas = 0
   let etiqueta = 'Cuota'
   if (frecuencia === 'weekly') {
@@ -25,10 +26,12 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
     etiqueta = 'Mes'
   }
 
+  // Interés simple directo (Calculadora General del Excel)
   const totalInteres = p * rm
   const totalPagar = p + totalInteres
   const montoCuota = Math.round((totalPagar / totalCuotas) * 100) / 100
 
+  // Regla del 30% + tolerancia RD$1,000
   let errorMsg = '', warningMsg = ''
   if (ingresoNeto && parseFloat(ingresoNeto) > 0) {
     const ingreso = parseFloat(ingresoNeto)
@@ -47,6 +50,7 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
     }
   }
 
+  // Generar tabla de cuotas reductiva
   const listado = []
   let saldo = totalPagar
   for (let i = 1; i <= totalCuotas; i++) {
@@ -63,7 +67,7 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
   return { cuotas: listado, error: errorMsg, warning: warningMsg, montoCuota }
 }
 
-function Loans() {
+export default function Loans() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id
   const branchId  = user?.branch?.id
@@ -78,12 +82,12 @@ function Loans() {
   const [form, setForm]         = useState({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
   const [saving, setSaving]     = useState(false)
   const [clients, setClients]   = useState([])
-  const [products, setProducts] = useState([])
   const [analisis, setAnalisis] = useState({ cuotas: [], error: '', warning: '', montoCuota: 0 })
   const [showSchedule, setShowSchedule] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [idDocUrl, setIdDocUrl] = useState('')
 
+  // Calculadora en tiempo real
   useEffect(() => {
     setAnalisis(calcularEstructura({
       monto: form.amount_requested,
@@ -113,22 +117,7 @@ function Loans() {
 
   useEffect(() => { load() }, [load])
 
- async function openNew() {
-  const cid = companyId || 'a0000000-0000-4000-8000-000000000001'
-  setForm({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
-  setIdDocUrl('')
-  setShowSchedule(false)
-  setShowModal(true)
-  try {
-    const { data: cls } = await supabase
-      .from('clients')
-      .select('id, first_name, last_name, client_code')
-      .eq('company_id', cid)
-      .eq('status', 'active')
-      .limit(100)
-    setClients(cls || [])
-  } catch {}
-}
+  async function openNew() {
     setForm({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
     setIdDocUrl('')
     setShowSchedule(false)
@@ -137,22 +126,16 @@ function Loans() {
       const { data: cls } = await supabase
         .from('clients')
         .select('id, first_name, last_name, client_code')
-        .eq('company_id', companyId || 'a0000000-0000-4000-8000-000000000001')
+        .eq('company_id', companyId)
         .eq('status', 'active')
         .limit(100)
       setClients(cls || [])
-
-      // ¡CORREGIDO AQUÍ! Se cambió 'type' por 'category'
-      const { data: prods } = await supabase
-        .from('financial_products')
-        .select('id, name, category')
-        .eq('company_id', companyId)
-      setProducts(prods || [])
     } catch {}
   }
 
   function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
+  // Alternar estado de pago de cuota (lógica reductiva)
   function alternarCuota(index) {
     setAnalisis(prev => ({
       ...prev,
@@ -160,8 +143,9 @@ function Loans() {
     }))
   }
 
+  // Totales reductivos en tiempo real
   const cuotasPagadas    = analisis.cuotas.filter(c => c.pagado).length
-  const totalCobrado      = analisis.cuotas.filter(c => c.pagado).reduce((a, c) => a + c.monto, 0)
+  const totalCobrado     = analisis.cuotas.filter(c => c.pagado).reduce((a, c) => a + c.monto, 0)
   const balancePendiente = analisis.cuotas.filter(c => !c.pagado).reduce((a, c) => a + c.monto, 0)
 
   async function uploadIdDoc(file) {
@@ -174,8 +158,9 @@ function Loans() {
       if (err) throw err
       const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path)
       setIdDocUrl(urlData.publicUrl)
+      fc('id_doc_url', urlData.publicUrl)
     } catch {
-      alert('Error al subir documento. Verifica el almacenamiento.')
+      alert('Error al subir documento. Verifica que el bucket "documents" existe en Supabase Storage.')
     }
     setUploading(false)
   }
@@ -184,6 +169,7 @@ function Loans() {
     if (analisis.error) return
     setSaving(true)
     try {
+      // Validación campos obligatorios
       const requeridos = [
         ['client_id',        'Cliente'],
         ['amount_requested', 'Monto Solicitado'],
@@ -195,56 +181,15 @@ function Loans() {
         if (!form[campo]) throw new Error(`El campo "${label}" es obligatorio`)
       }
 
-      const plazoOriginal = parseFloat(form.term_months)
-      const tipoFormulario = (form.type || 'personal').toLowerCase()
-      
-      let productoEncontrado = products.find(p => (p.category || '').toLowerCase() === tipoFormulario)
-      if (!productoEncontrado) {
-        productoEncontrado = products.find(p => 
-          (p.category || '').toLowerCase().includes(tipoFormulario) || 
-          (p.name || '').toLowerCase().includes(tipoFormulario)
-        )
-      }
-
-      let finalProductId = form.product_id || (productoEncontrado ? productoEncontrado.id : products[0]?.id)
-
-      if (!finalProductId) {
-        const nombresMapeados = {
-          personal: 'Préstamo Personal',
-          commercial: 'Préstamo Comercial',
-          business: 'Préstamo Emprende',
-          vehicle: 'Préstamo Vehículo',
-          mortgage: 'Terreno / Propiedad'
-        }
-        
-        const { data: nuevoProd, error: prodErr } = await supabase
-          .from('financial_products')
-          .insert([{
-            company_id: companyId,
-            code: `PROD-${tipoFormulario.toUpperCase()}-${Date.now().toString().slice(-4)}`,
-            name: nombresMapeados[tipoFormulario] || 'Préstamo General',
-            category: tipoFormulario,
-            rate_monthly: parseFloat(form.rate_monthly) || 30.0,
-            rate_annual: (parseFloat(form.rate_monthly) || 30.0) * 12,
-            rate_type: 'fixed',
-            currencies: [form.currency || 'DOP'],
-            is_active: true,
-            created_by: user.id
-          }])
-          .select('id')
-          .single()
-
-        if (prodErr) throw new Error(`Error estructural al autogenerar el producto financiero: ${prodErr.message}`)
-        finalProductId = nuevoProd.id
-      }
+      const estadoInicial = analisis.warning ? 'in_review' : 'submitted'
 
       await db.createLoanApplication({
         client_id:        form.client_id,
-        product_id:       finalProductId, 
-        type:              form.type || 'personal',
+        product_id:       form.product_id || null,
+        type:             form.type || 'personal',
         amount_requested: parseFloat(form.amount_requested),
-        currency:          form.currency || 'DOP',
-        term_months:      plazoOriginal === 2.5 ? 3 : Math.round(plazoOriginal),
+        currency:         form.currency || 'DOP',
+        term_months:      parseFloat(form.term_months),
         purpose:          form.purpose,
         monthly_income:   parseFloat(form.monthly_income),
         analyst_notes:    analisis.warning
@@ -253,12 +198,11 @@ function Loans() {
         ai_analysis: {
           frequency:         form.frequency,
           rate_monthly:      parseFloat(form.rate_monthly),
-          total_periods:      analisis.cuotas.length,
+          total_periods:     analisis.cuotas.length,
           cuota_individual:  analisis.montoCuota,
-          total_interes:      analisis.cuotas.reduce((a, c) => a + c.monto, 0) - parseFloat(form.amount_requested),
+          total_interes:     analisis.cuotas.reduce((a, c) => a + c.monto, 0) - parseFloat(form.amount_requested),
           id_doc_url:        idDocUrl || null,
-          requiere_autorizacion: !!analisis.warning,
-          real_term_months:  plazoOriginal 
+          requiere_autorizacion: !!analisis.warning
         }
       }, companyId, branchId, user.id)
 
@@ -318,32 +262,22 @@ function Loans() {
                 <tr><td colSpan={7}>
                   <Empty icon={CreditCard} title="Sin registros" desc="Registra la primera solicitud de préstamo" />
                 </td></tr>
-              ) : items.map(item => {
-                let plazoVisual = item.term_months;
-                const freq = item.ai_analysis?.frequency;
-                const periods = item.ai_analysis?.total_periods;
-                
-                if (item.term_months === 3 && ((freq === 'weekly' && periods === 10) || (freq === 'biweekly' && periods === 5))) {
-                  plazoVisual = 2.5;
-                }
-
-                return (
-                  <tr key={item.id}>
-                    <td className="font-mono text-xs font-semibold text-hpa-700">
-                      {item.application_code || item.loan_code}
-                    </td>
-                    <td>
-                      <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
-                      <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
-                    </td>
-                    <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
-                    <td>{plazoVisual} meses</td>
-                    <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
-                    <td><StatusBadge status={item.status} /></td>
-                    <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
-                  </tr>
-                );
-              })}
+              ) : items.map(item => (
+                <tr key={item.id}>
+                  <td className="font-mono text-xs font-semibold text-hpa-700">
+                    {item.application_code || item.loan_code}
+                  </td>
+                  <td>
+                    <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
+                    <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
+                  </td>
+                  <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
+                  <td>{item.term_months} meses</td>
+                  <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
+                  <td><StatusBadge status={item.status} /></td>
+                  <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -363,6 +297,7 @@ function Loans() {
           </>
         }>
 
+        {/* Alertas del análisis del 30% */}
         {analisis.error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex gap-2 items-start rounded-lg">
             <ShieldAlert size={16} className="flex-shrink-0 mt-0.5" /> {analisis.error}
@@ -375,6 +310,8 @@ function Loans() {
         )}
 
         <div className="space-y-5">
+
+          {/* DATOS DEL SOLICITANTE */}
           <div>
             <p className="form-section-title">Datos del Solicitante</p>
             <div className="form-row">
@@ -390,13 +327,14 @@ function Loans() {
                 <select className="select" value={form.type||'personal'} onChange={e=>fc('type',e.target.value)}>
                   <option value="personal">Personal (Corto Plazo)</option>
                   <option value="commercial">Comercial (Corto Plazo)</option>
-                  <option value="business">Préstamo Emprende</option>
-                  <option value="vehicle">Vehículo</option>
-                  <option value="mortgage">Terreno / Propiedad</option>
+                  <option value="business">💼 Préstamo Emprende</option>
+                  <option value="vehicle">🚗 Vehículo</option>
+                  <option value="mortgage">🏠 Terreno / Propiedad</option>
                 </select>
               </Field>
             </div>
 
+            {/* Documento de identificación */}
             <div className="mt-3">
               <Field label="Documento de Identificación (Cédula / Pasaporte)" required>
                 <div className="flex gap-3 items-center">
@@ -416,6 +354,7 @@ function Loans() {
             </div>
           </div>
 
+          {/* CONDICIONES */}
           <div>
             <p className="form-section-title">Condiciones del Préstamo</p>
             <div className="grid grid-cols-3 gap-3">
@@ -457,6 +396,7 @@ function Loans() {
             </div>
           </div>
 
+          {/* SIMULADOR REDUCTIVO DE CUOTAS */}
           {analisis.cuotas.length > 0 && (
             <div className="bg-hpa-slate-1 rounded-xl p-4 border border-hpa-slate-3 space-y-3">
               <div className="flex justify-between items-center">
@@ -472,6 +412,7 @@ function Loans() {
                 </button>
               </div>
 
+              {/* Resumen reductivo */}
               <div className="grid grid-cols-4 gap-2 text-center bg-white p-3 rounded-lg border border-hpa-slate-2 text-xs">
                 <div>
                   <p className="text-hpa-slate-5">Cuota {tipoLabel[form.frequency]}</p>
@@ -491,6 +432,7 @@ function Loans() {
                 </div>
               </div>
 
+              {/* Tabla reductiva interactiva */}
               {showSchedule && (
                 <div className="max-h-52 overflow-y-auto bg-white rounded-lg border border-hpa-slate-2">
                   <table className="table text-[11px] w-full">
@@ -533,6 +475,7 @@ function Loans() {
             </div>
           )}
 
+          {/* NOTAS */}
           <div>
             <Field label="Notas del Analista">
               <textarea className="input h-16 resize-none"
@@ -540,10 +483,9 @@ function Loans() {
                 value={form.analyst_notes||''} onChange={e=>fc('analyst_notes',e.target.value)} />
             </Field>
           </div>
+
         </div>
       </Modal>
     </div>
   )
 }
-
-export default Loans;
