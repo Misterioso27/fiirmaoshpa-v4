@@ -6,7 +6,7 @@ import useAuthStore from '@/store/auth'
 
 export default function Collections() {
   const { user } = useAuthStore()
-  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+  const companyId = user?.company_id || user?.company?.id || user?.raw_user_meta_data?.company_id;
   const branchId = user?.branch?.id
 
   const [loadingSession, setLoadingSession] = useState(false)
@@ -18,14 +18,15 @@ export default function Collections() {
   const [amountToPay, setAmountToPay] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // 1. Validar sesión de caja abierta
+  // 1. Validar sesión de caja abierta (REEMPLAZAR DESDE AQUÍ)
   const checkSession = useCallback(async () => {
-    if (!user?.id) return
+    if (!user?.id || !companyId) return
     setLoadingSession(true)
     try {
       const { data } = await supabase
         .from('cash_sessions')
         .select('*')
+        .eq('company_id', companyId) // ✅ Filtro RLS añadido
         .eq('status', 'open')
         .limit(1)
       
@@ -38,10 +39,10 @@ export default function Collections() {
       console.error('Error en checkSession:', err) 
     }
     setLoadingSession(false)
-  }, [user?.id])
+  }, [user?.id, companyId])
 
   useEffect(() => { checkSession() }, [checkSession])
-
+  // (HASTA AQUÍ)
   // 2. Buscador blindado (Metáfora del Emparedado)
   const handleSearch = async (e) => {
     if (e) e.preventDefault()
