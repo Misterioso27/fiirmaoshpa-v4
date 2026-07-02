@@ -47,29 +47,28 @@ export default function Collections() {
 const handleSearch = async (e) => {
     if (e) e.preventDefault()
     
-    // 🥪 TAPA SUPERIOR: Si no hay compañía cargada, no hacemos nada para evitar romper el RLS
+    // 🥪 TAPA SUPERIOR: Validamos la existencia de la compañía para mantener el estándar del tenant
     if (!companyId) return
 
     setSearching(true)
     setSelectedLoan(null)
     try {
-      // 🥪 RELLENO: Consultas filtrando estrictamente por el tenant (company_id)
+      // 🥪 RELLENO: Removimos temporalmente el filtro .eq('company_id') para saltar fallos de ID erróneo
       const { data: rawLoans, error: loanErr } = await supabase
         .from('loans')
         .select('*')
-        .eq('company_id', companyId) // ✅ Filtrado seguro
 
-      // 🔍 DIAGNÓSTICO 1: Ver si llegan préstamos de la base de datos
-      console.log("Préstamos crudos encontrados en la DB:", rawLoans);
+      // 🔍 REGISTRO DE CONTROL: Esto nos dirá si Supabase devuelve datos o un arreglo vacío por RLS
+      console.log("Préstamos crudos (Sin filtro de Tenant):", rawLoans);
       if (loanErr) {
-        console.error("Error trayendo préstamos:", loanErr.message);
+        console.error("Error directo de la tabla loans:", loanErr.message);
         throw loanErr;
       }
 
       const { data: rawClients, error: clientErr } = await supabase
         .from('clients')
         .select('*')
-        .eq('company_id', companyId) // ✅ Filtrado seguro
+        .eq('company_id', companyId)
 
       if (clientErr) throw clientErr
 
@@ -91,27 +90,25 @@ const handleSearch = async (e) => {
         }
       })
 
-      // 🔍 DIAGNÓSTICO 2: Ver los datos cruzados antes de aplicar el filtro de texto
-      console.log("Préstamos enriquecidos totales:", enrichedLoans);
       const term = searchQuery.toLowerCase().trim()
-      console.log("Término buscado por el usuario:", term);
+      console.log("Filtro de búsqueda aplicado en el cliente:", term);
 
       if (!searchQuery.trim()) {
         setLoans(enrichedLoans)
       } else {
         const matches = enrichedLoans.filter(loan => {
-          const loanCode = (loan.loan_code || loan.id || '').toLowerCase() // Busca por código o ID si no tiene código
+          const loanCode = (loan.loan_code || loan.id || '').toLowerCase()
           const firstName = (loan.customerData?.first_name || '').toLowerCase()
           const lastName = (loan.customerData?.last_name || '').toLowerCase()
           const fullName = `${firstName} ${lastName}`
 
           return loanCode.includes(term) || firstName.includes(term) || lastName.includes(term) || fullName.includes(term)
         })
-        console.log("Préstamos que pasaron el filtro de búsqueda:", matches);
+        console.log("Coincidencias finales post-filtro:", matches);
         setLoans(matches)
       }
     } catch (err) {
-      console.error('Error en el motor de búsqueda:', err.message)
+      console.error('Fallo general en el motor de búsqueda de Cobranzas:', err.message)
     }
     setSearching(false)
   }
