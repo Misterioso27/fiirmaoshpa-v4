@@ -1,272 +1,173 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Search, DollarSign, User, FileText, AlertCircle, RefreshCw } from 'lucide-react'
-import { supabase, fmt, fmtDate } from '@/lib/supabase'
-import { Field, Spinner } from '@/components/ui'
-import useAuthStore from '@/store/auth'
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient'; // Ajusta la ruta según tu proyecto
+import { Search, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 export default function Collections() {
-  const { user } = useAuthStore()
-  const branchId = user?.branch?.id
+  const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [accounts, setAccounts] = useState([]);
+  const [searched, setSearched] = useState(false);
+  const [cashOpen, setCashOpen] = useState(false);
 
-  const [loadingSession, setLoadingSession] = useState(false)
-  const [activeSession, setActiveSession] = useState(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searching, setSearching] = useState(false)
-  const [loans, setLoans] = useState([])
-  const [selectedLoan, setSelectedLoan] = useState(null)
-  const [amountToPay, setAmountToPay] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  // 1. Verificar si la caja está abierta al cargar la página
+  useEffect(() => {
+    checkCashSession();
+  }, []);
 
-  // 1. Validar si el cajero tiene sesión abierta
-  const checkSession = useCallback(async () => {
-    if (!user?.id) return
-    setLoadingSession(true)
+  async function checkCashSession() {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('cash_sessions')
         .select('*')
-        .eq('user_id', user.id)
         .eq('status', 'open')
-        .maybeSingle()
-      setActiveSession(data)
-    } catch (err) { console.error(err) }
-    setLoadingSession(false)
-  }, [user?.id])
+        .maybeSingle();
 
-  useEffect(() => { checkSession() }, [checkSession])
+      if (error) throw error;
+      setCashOpen(!!data);
+    } catch (err) {
+      console.error('Error al validar sesión de caja:', err);
+    }
+  }
 
-  // 2. Buscar préstamos/carteras activas de forma tolerante a fallos
+  // 2. Buscador blindado (Busca por código HPA o por nombre en la tabla correcta)
   const handleSearch = async (e) => {
-    if (e) e.preventDefault()
-    
-    setSearching(true)
-    setSelectedLoan(null)
+    if (e) e.preventDefault();
+    if (!searchTerm.trim()) return;
+
+    setLoading(true);
+    setSearched(true);
+
     try {
-      // Intentamos traer los préstamos activos de la sucursal de forma directa y limpia
-      let loansQuery = supabase.from('loans').select('*').neq('status', 'paid')
-      if (branchId) loansQuery = loansQuery.eq('branch_id', branchId)
-      
-      const { data: rawLoans, error: loanErr } = await loansQuery
-      if (loanErr) throw loanErr
+      let query = supabase
+        .from('clients') // Cambiado a la tabla correcta que sí existe
+        .select('*');
 
-      // Traemos los clientes de forma independiente para cruzarlos en memoria (así evitamos errores de relación/join)
-      const { data: rawCustomers } = await supabase.from('customers').select('*')
-      const customersMap = (rawCustomers || []).reduce((acc, curr) => {
-        acc[curr.id] = curr
-        return acc
-      }, {})
-
-      // Cruzamos la información asignando el cliente correspondiente a cada préstamo
-      const enrichedLoans = (rawLoans || []).map(loan => ({
-        ...loan,
-        customerData: customersMap[loan.customer_id] || { first_name: 'Cliente', last_name: 'No Vinculado', id_number: '' }
-      }))
-
-      // Si no hay texto de búsqueda, mostramos todos los préstamos pendientes
-      if (!searchQuery.trim()) {
-        setLoans(enrichedLoans)
+      // Si el término parece un código HPA (ej. HPA-SOL-0002)
+      if (searchTerm.toUpperCase().includes('HPA')) {
+        query = query.ilike('loan_code', `%${searchTerm.trim()}%`);
       } else {
-        // Filtrado exhaustivo y dinámico por cualquier coincidencia
-        const term = searchQuery.toLowerCase().trim()
-        const matches = enrichedLoans.filter(loan => {
-          const loanCode = (loan.loan_code || '').toLowerCase()
-          const firstName = (loan.customerData?.first_name || '').toLowerCase()
-          const lastName = (loan.customerData?.last_name || '').toLowerCase()
-          const fullName = `${firstName} ${lastName}`
-          const docId = (loan.customerData?.id_number || '').toLowerCase()
-
-          return loanCode.includes(term) || firstName.includes(term) || lastName.includes(term) || fullName.includes(term) || docId.includes(term)
-        })
-        setLoans(matches)
-      }
-    } catch (err) {
-      console.error('Error crítico en cobranza:', err.message)
-      alert('Error en búsqueda: ' + err.message)
-    }
-    setSearching(false)
-  }
-
-  // Cargar lista inicial al montar el componente
-  useEffect(() => {
-    handleSearch()
-  }, [branchId])
-
-  // 3. Registrar el cobro/amortización
-  const handleProcessPayment = async (e) => {
-    e.preventDefault()
-    const paymentAmount = parseFloat(amountToPay)
-    if (isNaN(paymentAmount) || paymentAmount <= 0) return alert('Ingrese un monto válido')
-    if (!activeSession) return alert('Debe abrir caja antes de recibir pagos')
-
-    setSubmitting(true)
-    try {
-      // A. Insertar el movimiento de entrada en la caja activa
-      const { error: movErr } = await supabase.from('cash_movements').insert([{
-        cash_session_id: activeSession.id,
-        type: 'income',
-        amount: paymentAmount,
-        description: `Cobro cuota préstamo - Cartera: ${selectedLoan.loan_code}`
-      }])
-      if (movErr) throw movErr
-
-      // B. Actualizar el saldo disponible real de la sesión de caja
-      const newSessionBalance = parseFloat(activeSession.current_balance) + paymentAmount
-      await supabase
-        .from('cash_sessions')
-        .update({ current_balance: newSessionBalance })
-        .eq('id', activeSession.id)
-
-      // C. Actualizar la terminal física vinculada
-      if (activeSession.register_id) {
-        const { data: reg } = await supabase.from('cash_registers').select('current_balance').eq('id', activeSession.register_id).single()
-        const newRegBalance = (parseFloat(reg?.current_balance) || 0) + paymentAmount
-        await supabase.from('cash_registers').update({ current_balance: newRegBalance }).eq('id', activeSession.register_id)
+        // Si es texto suelto, busca por el nombre del cliente
+        query = query.ilike('full_name', `%${searchTerm.trim()}%`);
       }
 
-      // D. Afectar el balance pendiente del préstamo
-      const currentOutstanding = parseFloat(selectedLoan.outstanding_balance || selectedLoan.amount || 0)
-      const newOutstanding = Math.max(0, currentOutstanding - paymentAmount)
-      const nextStatus = newOutstanding === 0 ? 'paid' : selectedLoan.status
+      const { data, error } = await query;
 
-      await supabase
-        .from('loans')
-        .update({ outstanding_balance: newOutstanding, status: nextStatus })
-        .eq('id', selectedLoan.id)
-
-      alert('¡Cobro procesado con éxito y caja actualizada!')
-      setAmountToPay('')
-      setSelectedLoan(null)
-      setSearchQuery('')
-      checkSession()
-      handleSearch()
+      if (error) throw error;
+      setAccounts(data || []);
     } catch (err) {
-      alert('Error al procesar cobro: ' + err.message)
+      console.error('Error en la búsqueda de cobranza:', err);
+      setAccounts([]);
+    } finally {
+      setLoading(false);
     }
-    setSubmitting(false)
-  }
+  };
 
-  if (loadingSession) return <div className="p-12 text-center"><Spinner size={24} className="mx-auto" /></div>
+  // 3. Restablecer el estado si el usuario borra el input manualmente
+  const handleInputChange = (e) => {
+    const value = e.target.value;
+    setSearchTerm(value);
+    if (value.trim() === '') {
+      setAccounts([]);
+      setSearched(false);
+    }
+  };
 
   return (
-    <div className="space-y-5">
-      <div className="flex justify-between items-center">
+    <div className="p-6 max-w-6xl mx-auto space-y-6">
+      {/* Encabezado y Alerta de Caja */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div>
-          <h2 className="text-xl font-bold text-hpa-slate-9">Módulo de Cobranza</h2>
-          <p className="text-xs text-hpa-slate-5">Gestión de recaudación y aplicación de amortizaciones en tiempo real</p>
+          <h1 className="text-2xl font-bold text-gray-900">Módulo de Cobranza</h1>
+          <p className="text-sm text-gray-500">Gestión de recaudación y aplicación de amortizaciones en tiempo real</p>
         </div>
-        <div>
-          {activeSession ? (
-            <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full border border-emerald-300">
-              ✓ Caja Abierta (Sesión Activa)
-            </span>
-          ) : (
-            <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full border border-amber-300">
-              ⚠ Requiere Apertura de Caja para Cobrar
-            </span>
-          )}
-        </div>
+
+        {cashOpen ? (
+          <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg border border-emerald-200 text-sm font-medium">
+            <CheckCircle2 className="w-4 h-4" />
+            Caja Abierta (Sesión Activa)
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-4 py-2 rounded-lg border border-amber-200 text-sm font-medium">
+            <AlertTriangle className="w-4 h-4" />
+            Requiere Apertura de Caja para Cobrar
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Panel Izquierdo: Buscador y Listado */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="card p-4 shadow-sm border border-hpa-slate-2">
-            <form onSubmit={handleSearch} className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-2.5 text-hpa-slate-4" size={16} />
-                <input
-                  type="text"
-                  className="input pl-9"
-                  placeholder="Buscar código o nombre cliente..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                />
-              </div>
-              <button type="submit" className="btn btn-secondary px-4 text-xs font-bold flex items-center gap-1" disabled={searching}>
-                {searching ? <RefreshCw size={12} className="animate-spin" /> : 'Filtrar'}
-              </button>
-            </form>
-          </div>
+      {/* Buscador y Resultados */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Panel Izquierdo: Formulario de Búsqueda */}
+        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 space-y-4 h-fit">
+          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Buscar Cartera Activa</h2>
+          
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Ej: HPA-SOL-0002 o Herik"
+                value={searchTerm}
+                onChange={handleInputChange}
+                className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+              />
+            </div>
+            
+            <button
+              type="submit"
+              disabled={loading || !searchTerm.trim()}
+              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 rounded-lg shadow-sm transition-colors flex items-center justify-center min-w-[76px]"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Filtrar'}
+            </button>
+          </form>
 
-          <div className="card p-4 space-y-2 min-h-[250px]">
-            <p className="text-xs font-bold text-hpa-slate-5 uppercase tracking-wider mb-2">Cuentas Encontradas</p>
-            {loans.length === 0 ? (
-              <div className="text-center py-12 text-xs text-hpa-slate-4">
-                No se encontraron cuentas activas con el criterio ingresado.
+          <hr className="border-gray-100" />
+
+          {/* Lista de Cuentas Encontradas */}
+          <div>
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+              {searched ? 'Cuentas Encontradas' : 'Cuentas con Balance Pendiente'}
+            </h3>
+
+            {loading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
               </div>
-            ) : (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {loans.map(loan => (
-                  <div
-                    key={loan.id}
-                    onClick={() => setSelectedLoan(loan)}
-                    className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${selectedLoan?.id === loan.id ? 'bg-hpa-slate-9 text-white border-hpa-slate-9 shadow-md' : 'bg-white border-hpa-slate-2 hover:bg-hpa-slate-1'}`}
+            ) : accounts.length > 0 ? (
+              <div className="space-y-2">
+                {accounts.map((acc) => (
+                  <div 
+                    key={acc.id} 
+                    className="p-3 bg-gray-50 hover:bg-indigo-50/50 border border-gray-200 hover:border-indigo-200 rounded-lg cursor-pointer transition-all"
                   >
-                    <p className="text-xs font-bold font-numeric">{loan.loan_code}</p>
-                    <p className="text-sm font-medium">{loan.customerData?.first_name} {loan.customerData?.last_name}</p>
-                    <p className={`text-xs mt-1 font-bold font-numeric ${selectedLoan?.id === loan.id ? 'text-emerald-300' : 'text-emerald-600'}`}>
-                      Balance: {fmt(loan.outstanding_balance || loan.amount)}
-                    </p>
+                    <p className="font-semibold text-sm text-gray-800">{acc.full_name}</p>
+                    <p className="text-xs text-gray-500">{acc.loan_code || 'Sin código activo'}</p>
                   </div>
                 ))}
               </div>
+            ) : searched ? (
+              <p className="text-xs text-center text-gray-400 py-6">
+                No se encontraron cuentas activas con el criterio ingresado.
+              </p>
+            ) : (
+              <p className="text-xs text-center text-gray-400 py-6">
+                Usa el buscador superior para filtrar las cuentas de la cartera.
+              </p>
             )}
           </div>
         </div>
 
-        {/* Panel Derecho: Formulario de Recaudación */}
-        <div className="lg:col-span-7">
-          {!selectedLoan ? (
-            <div className="card border border-dashed border-hpa-slate-3 h-full flex flex-col items-center justify-center text-center p-8 min-h-[360px]">
-              <div className="p-4 bg-hpa-slate-1 rounded-full text-hpa-slate-4 mb-3"><User size={32} /></div>
-              <h4 className="text-sm font-bold text-hpa-slate-8">Ningún préstamo seleccionado</h4>
-              <p className="text-xs text-hpa-slate-4 max-w-xs mt-1">Seleccione una cuenta de la cartera activa en el panel izquierdo para procesar su cobranza.</p>
-            </div>
-          ) : (
-            <div className="card p-6 border border-hpa-slate-2 shadow-sm space-y-6">
-              <div className="border-b border-hpa-slate-2 pb-4 flex justify-between items-start">
-                <div>
-                  <span className="text-[10px] font-bold bg-hpa-slate-2 text-hpa-slate-8 px-2 py-0.5 rounded uppercase font-numeric">{selectedLoan.loan_code}</span>
-                  <h3 className="text-base font-bold text-hpa-slate-9 mt-1">{selectedLoan.customerData?.first_name} {selectedLoan.customerData?.last_name}</h3>
-                  <p className="text-xs text-hpa-slate-4 flex items-center gap-1 mt-0.5"><FileText size={12} /> Doc: {selectedLoan.customerData?.id_number || 'N/A'}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[11px] text-hpa-slate-4 uppercase">Balance Pendiente</p>
-                  <p className="text-xl font-black text-emerald-600 font-numeric">{fmt(selectedLoan.outstanding_balance || selectedLoan.amount)}</p>
-                </div>
-              </div>
-
-              <form onSubmit={handleProcessPayment} className="space-y-4">
-                <Field label="Monto a Recaudar / Abonar" required>
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-2.5 text-hpa-slate-4" size={16} />
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="input pl-9 font-bold text-lg font-numeric text-emerald-700"
-                      placeholder="0.00"
-                      value={amountToPay}
-                      onChange={e => setAmountToPay(e.target.value)}
-                      disabled={!activeSession || submitting}
-                    />
-                  </div>
-                </Field>
-
-                <button
-                  type="submit"
-                  className="btn btn-primary w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2"
-                  disabled={!activeSession || submitting}
-                >
-                  {submitting ? <Spinner size={14} /> : 'Aplicar Amortización y Registrar Ingreso'}
-                </button>
-                {!activeSession && (
-                  <p className="text-[11px] text-red-600 flex items-center gap-1 justify-center"><AlertCircle size={12} /> Habilite la sesión de caja para poder procesar transacciones.</p>
-                )}
-              </form>
-            </div>
-          )}
+        {/* Panel Derecho: Detalles del préstamo seleccionado (Placeholder) */}
+        <div className="lg:col-span-2 bg-white p-8 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center min-h-[350px]">
+          <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 mb-4">
+            $
+          </div>
+          <h3 className="font-semibold text-gray-700 mb-1">Ningún préstamo seleccionado</h3>
+          <p className="text-xs text-gray-400 max-w-sm">
+            Selecciona una cuenta de la cartera activa en el panel de la izquierda para desplegar y procesar su cobranza.
+          </p>
         </div>
       </div>
     </div>
-  )
+  );
 }
