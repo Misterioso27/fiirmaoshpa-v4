@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, DollarSign, User, AlertCircle, RefreshCw } from 'lucide-react'
+import { Search, DollarSign, User, RefreshCw } from 'lucide-react'
 import { supabase, fmt } from '@/lib/supabase'
 import { Field, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -41,14 +41,14 @@ export default function Collections() {
 
   useEffect(() => { checkSession() }, [checkSession])
 
-  // 2. Buscador blindado apuntando a la tabla 'clients'
+  // 2. Buscador blindado: Trae préstamos activos y cruza con clientes
   const handleSearch = async (e) => {
     if (e) e.preventDefault()
     
     setSearching(true)
     setSelectedLoan(null)
     try {
-      // Traer préstamos activos
+      // 1. Descargamos todos los préstamos que no estén pagados
       const { data: rawLoans, error: loanErr } = await supabase
         .from('loans')
         .select('*')
@@ -56,17 +56,21 @@ export default function Collections() {
 
       if (loanErr) throw loanErr
 
-      // Traer datos de 'clients' para cruzar la información
-      const { data: rawClients } = await supabase
+      // 2. Descargamos la lista de clientes para cruzar los nombres
+      const { data: rawClients, error: clientErr } = await supabase
         .from('clients')
         .select('*')
+
+      if (clientErr) throw clientErr
 
       const clientsMap = (rawClients || []).reduce((acc, curr) => {
         acc[curr.id] = curr
         return acc
       }, {})
 
+      // 3. Unimos la información vinculando por ID
       const enrichedLoans = (rawLoans || []).map(loan => {
+        // Mapeo flexible por si la columna se llama client_id o customer_id
         const targetClientId = loan.client_id || loan.customer_id
         const clientData = clientsMap[targetClientId]
 
@@ -74,12 +78,12 @@ export default function Collections() {
           ...loan,
           customerData: clientData || { 
             first_name: loan.client_name || 'Cliente', 
-            last_name: loan.client_lastname || 'No Sincronizado'
+            last_name: loan.client_lastname || 'Sin Apellido'
           }
         }
       })
 
-      // Filtrar según el término del input
+      // 4. Aplicamos el filtro de búsqueda de manera local y segura
       if (!searchQuery.trim()) {
         setLoans(enrichedLoans)
       } else {
@@ -90,21 +94,23 @@ export default function Collections() {
           const lastName = (loan.customerData?.last_name || '').toLowerCase()
           const fullName = `${firstName} ${lastName}`
 
+          // Evalúa si coincide con el código de préstamo o el nombre del cliente
           return loanCode.includes(term) || firstName.includes(term) || lastName.includes(term) || fullName.includes(term)
         })
         setLoans(matches)
       }
     } catch (err) {
-      console.error('Error en motor de búsqueda:', err.message)
+      console.error('Error en el motor de búsqueda:', err.message)
     }
     setSearching(false)
   }
 
+  // Carga inicial de datos
   useEffect(() => {
     handleSearch()
   }, [branchId])
 
-  // Manejar limpieza limpia del input
+  // Manejar el cambio de texto e inicializar si se limpia
   const handleInputChange = (e) => {
     const value = e.target.value
     setSearchQuery(value)
@@ -113,7 +119,7 @@ export default function Collections() {
     }
   }
 
-  // 3. Procesar abono
+  // 3. Procesar cobro / abono de cuota
   const handleProcessPayment = async (e) => {
     e.preventDefault()
     const paymentAmount = parseFloat(amountToPay)
