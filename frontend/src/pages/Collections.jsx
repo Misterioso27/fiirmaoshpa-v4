@@ -44,7 +44,7 @@ export default function Collections() {
   useEffect(() => { checkSession() }, [checkSession])
   // (HASTA AQUÍ)
   // 2. Buscador blindado (Metáfora del Emparedado)
-  const handleSearch = async (e) => {
+const handleSearch = async (e) => {
     if (e) e.preventDefault()
     
     // 🥪 TAPA SUPERIOR: Si no hay compañía cargada, no hacemos nada para evitar romper el RLS
@@ -58,9 +58,13 @@ export default function Collections() {
         .from('loans')
         .select('*')
         .eq('company_id', companyId) // ✅ Filtrado seguro
-        .neq('status', 'paid')
 
-      if (loanErr) throw loanErr
+      // 🔍 DIAGNÓSTICO 1: Ver si llegan préstamos de la base de datos
+      console.log("Préstamos crudos encontrados en la DB:", rawLoans);
+      if (loanErr) {
+        console.error("Error trayendo préstamos:", loanErr.message);
+        throw loanErr;
+      }
 
       const { data: rawClients, error: clientErr } = await supabase
         .from('clients')
@@ -87,18 +91,23 @@ export default function Collections() {
         }
       })
 
+      // 🔍 DIAGNÓSTICO 2: Ver los datos cruzados antes de aplicar el filtro de texto
+      console.log("Préstamos enriquecidos totales:", enrichedLoans);
+      const term = searchQuery.toLowerCase().trim()
+      console.log("Término buscado por el usuario:", term);
+
       if (!searchQuery.trim()) {
         setLoans(enrichedLoans)
       } else {
-        const term = searchQuery.toLowerCase().trim()
         const matches = enrichedLoans.filter(loan => {
-          const loanCode = (loan.loan_code || '').toLowerCase()
+          const loanCode = (loan.loan_code || loan.id || '').toLowerCase() // Busca por código o ID si no tiene código
           const firstName = (loan.customerData?.first_name || '').toLowerCase()
           const lastName = (loan.customerData?.last_name || '').toLowerCase()
           const fullName = `${firstName} ${lastName}`
 
           return loanCode.includes(term) || firstName.includes(term) || lastName.includes(term) || fullName.includes(term)
         })
+        console.log("Préstamos que pasaron el filtro de búsqueda:", matches);
         setLoans(matches)
       }
     } catch (err) {
