@@ -114,7 +114,24 @@ const useAuthStore = create((set, get) => ({
       }
       localStorage.setItem('hpa_token', session.access_token)
       const stored = localStorage.getItem('hpa_user')
-      if (stored) set({ user: JSON.parse(stored), token: session.access_token })
+      if (stored) {
+        const userData = JSON.parse(stored)
+        // Si no tiene company, agregar el default
+        if (!userData.company) {
+          userData.company = {
+            id: 'a0000000-0000-4000-8000-000000000001',
+            name: 'Financiera HPA',
+            currency_base: 'DOP'
+          }
+        }
+        if (!userData.branch) {
+          userData.branch = {
+            id: 'b0000000-0000-4000-8000-000000000001',
+            name: 'Sede Central'
+          }
+        }
+        set({ user: userData, token: session.access_token })
+      }
     } catch {}
   },
 
