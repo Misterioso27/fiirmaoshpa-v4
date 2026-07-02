@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, DollarSign, User, RefreshCw } from 'lucide-react'
-import { supabase, fmt } from '@/lib/supabase'
+import { db, fmt, fmtDate } from '@/lib/supabase'
 import { Field, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
 export default function Collections() {
   const { user } = useAuthStore()
+  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   const branchId = user?.branch?.id
 
   const [loadingSession, setLoadingSession] = useState(false)
