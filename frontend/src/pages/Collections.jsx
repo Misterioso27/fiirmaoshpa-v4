@@ -47,23 +47,19 @@ export default function Collections() {
 const handleSearch = async (e) => {
     if (e) e.preventDefault()
     
-    // 🥪 TAPA SUPERIOR: Validamos la existencia de la compañía para mantener el estándar del tenant
     if (!companyId) return
 
     setSearching(true)
     setSelectedLoan(null)
     try {
-      // 🥪 RELLENO: Removimos temporalmente el filtro .eq('company_id') para saltar fallos de ID erróneo
+      // 🥪 RELLENO: Con el RLS activo, es OBLIGATORIO filtrar por company_id
       const { data: rawLoans, error: loanErr } = await supabase
         .from('loans')
         .select('*')
+        .eq('company_id', companyId) // ✅ Filtro de seguridad restaurado
 
-      // 🔍 REGISTRO DE CONTROL: Esto nos dirá si Supabase devuelve datos o un arreglo vacío por RLS
-      console.log("Préstamos crudos (Sin filtro de Tenant):", rawLoans);
-      if (loanErr) {
-        console.error("Error directo de la tabla loans:", loanErr.message);
-        throw loanErr;
-      }
+      console.log("Préstamos con RLS Activo:", rawLoans);
+      if (loanErr) throw loanErr
 
       const { data: rawClients, error: clientErr } = await supabase
         .from('clients')
@@ -91,7 +87,6 @@ const handleSearch = async (e) => {
       })
 
       const term = searchQuery.toLowerCase().trim()
-      console.log("Filtro de búsqueda aplicado en el cliente:", term);
 
       if (!searchQuery.trim()) {
         setLoans(enrichedLoans)
@@ -104,11 +99,10 @@ const handleSearch = async (e) => {
 
           return loanCode.includes(term) || firstName.includes(term) || lastName.includes(term) || fullName.includes(term)
         })
-        console.log("Coincidencias finales post-filtro:", matches);
         setLoans(matches)
       }
     } catch (err) {
-      console.error('Fallo general en el motor de búsqueda de Cobranzas:', err.message)
+      console.error('Error en búsqueda de Cobranzas:', err.message)
     }
     setSearching(false)
   }
