@@ -1,18 +1,15 @@
+cat > /mnt/user-data/outputs/Loans.jsx << 'ENDOFFILE'
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, CreditCard, Calculator, Upload, ShieldAlert, CheckCircle2 } from 'lucide-react'
+import { Plus, CreditCard, Calculator, Upload, ShieldAlert, CheckCircle2, Edit2 } from 'lucide-react'
 import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner, Tabs } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
-// ─── MOTOR DE AMORTIZACIÓN (Lógica exacta del Excel de Margareth) ────
 function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto }) {
   if (!monto || !tasaMensual || !meses) return { cuotas: [], error: '', warning: '', montoCuota: 0 }
-
   const p = parseFloat(monto)
   const rm = parseFloat(tasaMensual) / 100
   const tiempo = parseFloat(meses)
-
-  // Mapeo estricto según Excel: Frecuencia × Tiempo
   let totalCuotas = 0
   let etiqueta = 'Cuota'
   if (frecuencia === 'weekly') {
@@ -25,13 +22,9 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
     totalCuotas = 3
     etiqueta = 'Mes'
   }
-
-  // Interés simple directo (Calculadora General del Excel)
   const totalInteres = p * rm
   const totalPagar = p + totalInteres
   const montoCuota = Math.round((totalPagar / totalCuotas) * 100) / 100
-
-  // Regla del 30% + tolerancia RD$1,000
   let errorMsg = '', warningMsg = ''
   if (ingresoNeto && parseFloat(ingresoNeto) > 0) {
     const ingreso = parseFloat(ingresoNeto)
@@ -40,7 +33,6 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
       : frecuencia === 'biweekly' ? montoCuota * 2 : montoCuota
     const limite30 = ingreso * 0.30
     const exceso = cuotaMensualEquiv - limite30
-
     if (cuotaMensualEquiv > limite30) {
       if (exceso <= 1000) {
         warningMsg = `⚠️ Requiere Autorización Administrativa: Excede el límite del 30% por RD$ ${exceso.toLocaleString('en-US', { minimumFractionDigits: 2 })}. Se guardará en revisión.`
@@ -49,27 +41,18 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
       }
     }
   }
-
-  // Generar tabla de cuotas reductiva
   const listado = []
   let saldo = totalPagar
   for (let i = 1; i <= totalCuotas; i++) {
     saldo = Math.max(0, saldo - montoCuota)
-    listado.push({
-      num: i,
-      label: `${etiqueta} ${i}`,
-      monto: montoCuota,
-      saldoRestante: Math.round(saldo * 100) / 100,
-      pagado: false
-    })
+    listado.push({ num: i, label: `${etiqueta} ${i}`, monto: montoCuota, saldoRestante: Math.round(saldo * 100) / 100, pagado: false })
   }
-
   return { cuotas: listado, error: errorMsg, warning: warningMsg, montoCuota }
 }
 
 export default function Loans() {
   const { user } = useAuthStore()
-const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   const branchId  = user?.branch?.id  || 'b0000000-0000-4000-8000-000000000001'
 
   const [tab, setTab]           = useState('applications')
@@ -81,13 +64,13 @@ const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   const [showModal, setShowModal] = useState(false)
   const [form, setForm]         = useState({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
   const [saving, setSaving]     = useState(false)
+  const [selected, setSelected] = useState(null)
   const [clients, setClients]   = useState([])
   const [analisis, setAnalisis] = useState({ cuotas: [], error: '', warning: '', montoCuota: 0 })
   const [showSchedule, setShowSchedule] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [idDocUrl, setIdDocUrl] = useState('')
 
-  // Calculadora en tiempo real
   useEffect(() => {
     setAnalisis(calcularEstructura({
       monto: form.amount_requested,
@@ -118,12 +101,13 @@ const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   useEffect(() => { load() }, [load])
 
   async function openNew() {
-    const cid = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+    const cid = companyId
     setForm({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
+    setSelected(null)
     setIdDocUrl('')
     setShowSchedule(false)
     setShowModal(true)
-async function fetchClients() {
+    async function fetchClients() {
       try {
         const { data: cls, error } = await supabase
           .from('clients')
@@ -131,15 +115,43 @@ async function fetchClients() {
           .eq('company_id', cid)
           .eq('status', 'active')
           .limit(100)
-        console.log('CID:', cid, 'CLIENTES:', cls, 'ERROR:', error)
         if (!error && cls) setClients(cls)
-      } catch (e) { console.log('CATCH ERROR:', e) }
+      } catch {}
     }
-    console.log('CID antes fetch:', cid, 'USER company:', user?.company?.id)
     fetchClients()
   }
+
+  function openEdit(item) {
+    setForm({
+      client_id: item.client_id,
+      type: item.type,
+      currency: item.currency,
+      amount_requested: item.amount_requested,
+      term_months: item.term_months,
+      purpose: item.purpose,
+      monthly_income: item.monthly_income,
+      analyst_notes: item.analyst_notes,
+      frequency: item.ai_analysis?.frequency || 'monthly',
+      rate_monthly: item.ai_analysis?.rate_monthly || 30,
+    })
+    setSelected(item)
+    setShowModal(true)
+    async function fetchClients() {
+      try {
+        const { data: cls } = await supabase
+          .from('clients')
+          .select('id, first_name, last_name, client_code')
+          .eq('company_id', companyId)
+          .eq('status', 'active')
+          .limit(100)
+        if (cls) setClients(cls)
+      } catch {}
+    }
+    fetchClients()
+  }
+
   function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
-  // Alternar estado de pago de cuota (lógica reductiva)
+
   function alternarCuota(index) {
     setAnalisis(prev => ({
       ...prev,
@@ -147,7 +159,6 @@ async function fetchClients() {
     }))
   }
 
-  // Totales reductivos en tiempo real
   const cuotasPagadas    = analisis.cuotas.filter(c => c.pagado).length
   const totalCobrado     = analisis.cuotas.filter(c => c.pagado).reduce((a, c) => a + c.monto, 0)
   const balancePendiente = analisis.cuotas.filter(c => !c.pagado).reduce((a, c) => a + c.monto, 0)
@@ -164,7 +175,7 @@ async function fetchClients() {
       setIdDocUrl(urlData.publicUrl)
       fc('id_doc_url', urlData.publicUrl)
     } catch {
-      alert('Error al subir documento. Verifica que el bucket "documents" existe en Supabase Storage.')
+      alert('Error al subir documento.')
     }
     setUploading(false)
   }
@@ -173,44 +184,57 @@ async function fetchClients() {
     if (analisis.error) return
     setSaving(true)
     try {
-      // Validación campos obligatorios
       const requeridos = [
-        ['client_id',        'Cliente'],
+        ['client_id', 'Cliente'],
         ['amount_requested', 'Monto Solicitado'],
-        ['term_months',      'Plazo'],
-        ['purpose',          'Propósito'],
-        ['monthly_income',   'Ingreso Mensual'],
+        ['term_months', 'Plazo'],
+        ['purpose', 'Propósito'],
+        ['monthly_income', 'Ingreso Mensual'],
       ]
       for (const [campo, label] of requeridos) {
         if (!form[campo]) throw new Error(`El campo "${label}" es obligatorio`)
       }
 
-      const estadoInicial = analisis.warning ? 'in_review' : 'submitted'
-
-      await db.createLoanApplication({
-        client_id:        form.client_id,
-        product_id:       form.product_id || null,
-        type:             form.type || 'personal',
-        amount_requested: parseFloat(form.amount_requested),
-        currency:         form.currency || 'DOP',
-        term_months:      parseFloat(form.term_months),
-        purpose:          form.purpose,
-        monthly_income:   parseFloat(form.monthly_income),
-        analyst_notes:    analisis.warning
-          ? `[AUTORIZACIÓN REQUERIDA]: ${form.analyst_notes || ''}`
-          : form.analyst_notes || null,
-        ai_analysis: {
-          frequency:         form.frequency,
-          rate_monthly:      parseFloat(form.rate_monthly),
-          total_periods:     analisis.cuotas.length,
-          cuota_individual:  analisis.montoCuota,
-          total_interes:     analisis.cuotas.reduce((a, c) => a + c.monto, 0) - parseFloat(form.amount_requested),
-          id_doc_url:        idDocUrl || null,
-          requiere_autorizacion: !!analisis.warning
-        }
-      }, companyId, branchId, user.id)
+      // EDITAR solicitud existente
+      if (selected?.id) {
+        await supabase
+          .from('loan_applications')
+          .update({
+            purpose:        form.purpose,
+            analyst_notes:  form.analyst_notes || null,
+            monthly_income: parseFloat(form.monthly_income),
+            type:           form.type,
+          })
+          .eq('id', selected.id)
+          .eq('status', 'submitted')
+      } else {
+        // CREAR nueva solicitud
+        const estadoInicial = analisis.warning ? 'in_review' : 'submitted'
+        await db.createLoanApplication({
+          client_id:        form.client_id,
+          product_id:       form.product_id || null,
+          type:             form.type || 'personal',
+          amount_requested: parseFloat(form.amount_requested),
+          currency:         form.currency || 'DOP',
+          term_months:      parseFloat(form.term_months),
+          purpose:          form.purpose,
+          monthly_income:   parseFloat(form.monthly_income),
+          analyst_notes:    analisis.warning
+            ? `[AUTORIZACIÓN REQUERIDA]: ${form.analyst_notes || ''}`
+            : form.analyst_notes || null,
+          ai_analysis: {
+            frequency:            form.frequency,
+            rate_monthly:         parseFloat(form.rate_monthly),
+            total_periods:        analisis.cuotas.length,
+            cuota_individual:     analisis.montoCuota,
+            id_doc_url:           idDocUrl || null,
+            requiere_autorizacion: !!analisis.warning
+          }
+        }, companyId, branchId, user.id)
+      }
 
       setShowModal(false)
+      setSelected(null)
       load()
     } catch (err) { alert(err.message) }
     setSaving(false)
@@ -221,9 +245,7 @@ async function fetchClients() {
     { id: 'loans',        label: 'Préstamos Activos' },
   ]
 
-  const tipoLabel = {
-    'weekly': 'Semanal', 'biweekly': 'Quincenal', 'monthly': 'Mensual'
-  }
+  const tipoLabel = { 'weekly': 'Semanal', 'biweekly': 'Quincenal', 'monthly': 'Mensual' }
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -256,14 +278,14 @@ async function fetchClients() {
             <thead>
               <tr>
                 <th>Código</th><th>Cliente</th><th>Monto</th>
-                <th>Plazo</th><th>Propósito</th><th>Estado</th><th>Fecha</th>
+                <th>Plazo</th><th>Propósito</th><th>Estado</th><th>Fecha</th><th></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
+                <tr><td colSpan={8} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
               ) : items.length === 0 ? (
-                <tr><td colSpan={7}>
+                <tr><td colSpan={8}>
                   <Empty icon={CreditCard} title="Sin registros" desc="Registra la primera solicitud de préstamo" />
                 </td></tr>
               ) : items.map(item => (
@@ -280,6 +302,13 @@ async function fetchClients() {
                   <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
                   <td><StatusBadge status={item.status} /></td>
                   <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
+                  <td>
+                    {item.status === 'submitted' && (
+                      <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(item)} title="Editar">
+                        <Edit2 size={13} />
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -288,20 +317,17 @@ async function fetchClients() {
         <Pagination page={page} pages={pagination.pages} total={pagination.total} limit={20} onChange={setPage} />
       </div>
 
-      {/* ─── MODAL SOLICITUD ─────────────────────────────────────── */}
-      <Modal open={showModal} onClose={() => setShowModal(false)}
-        title="Nueva Solicitud de Préstamo" size="xl"
+      <Modal open={showModal} onClose={() => { setShowModal(false); setSelected(null) }}
+        title={selected ? 'Editar Solicitud' : 'Nueva Solicitud de Préstamo'} size="xl"
         footer={
           <>
-            <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={save}
-              disabled={saving || !!analisis.error}>
-              {saving ? <Spinner size={14} /> : 'Registrar Solicitud'}
+            <button className="btn btn-ghost" onClick={() => { setShowModal(false); setSelected(null) }}>Cancelar</button>
+            <button className="btn btn-primary" onClick={save} disabled={saving || !!analisis.error}>
+              {saving ? <Spinner size={14} /> : selected ? 'Guardar Cambios' : 'Registrar Solicitud'}
             </button>
           </>
         }>
 
-        {/* Alertas del análisis del 30% */}
         {analisis.error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex gap-2 items-start rounded-lg">
             <ShieldAlert size={16} className="flex-shrink-0 mt-0.5" /> {analisis.error}
@@ -314,13 +340,11 @@ async function fetchClients() {
         )}
 
         <div className="space-y-5">
-
-          {/* DATOS DEL SOLICITANTE */}
           <div>
             <p className="form-section-title">Datos del Solicitante</p>
             <div className="form-row">
               <Field label="Cliente" required>
-                <select className="select" value={form.client_id||''} onChange={e=>fc('client_id',e.target.value)}>
+                <select className="select" value={form.client_id||''} onChange={e=>fc('client_id',e.target.value)} disabled={!!selected}>
                   <option value="">Seleccionar cliente...</option>
                   {clients.map(c => (
                     <option key={c.id} value={c.id}>{c.first_name} {c.last_name} — {c.client_code}</option>
@@ -337,34 +361,34 @@ async function fetchClients() {
                 </select>
               </Field>
             </div>
-
-            {/* Documento de identificación */}
-            <div className="mt-3">
-              <Field label="Documento de Identificación (Cédula / Pasaporte)" required>
-                <div className="flex gap-3 items-center">
-                  <label className="btn btn-ghost btn-sm border border-dashed border-hpa-slate-3 cursor-pointer">
-                    <Upload size={13} className="inline mr-1" />
-                    {uploading ? 'Subiendo...' : idDocUrl ? 'Cambiar documento' : 'Subir Cédula / Pasaporte'}
-                    <input type="file" className="hidden" accept="image/*,.pdf"
-                      onChange={e => uploadIdDoc(e.target.files[0])} disabled={uploading} />
-                  </label>
-                  {idDocUrl && (
-                    <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                      <CheckCircle2 size={12} /> Documento cargado ✓
-                    </span>
-                  )}
-                </div>
-              </Field>
-            </div>
+            {!selected && (
+              <div className="mt-3">
+                <Field label="Documento de Identificación (Cédula / Pasaporte)" required>
+                  <div className="flex gap-3 items-center">
+                    <label className="btn btn-ghost btn-sm border border-dashed border-hpa-slate-3 cursor-pointer">
+                      <Upload size={13} className="inline mr-1" />
+                      {uploading ? 'Subiendo...' : idDocUrl ? 'Cambiar documento' : 'Subir Cédula / Pasaporte'}
+                      <input type="file" className="hidden" accept="image/*,.pdf"
+                        onChange={e => uploadIdDoc(e.target.files[0])} disabled={uploading} />
+                    </label>
+                    {idDocUrl && (
+                      <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                        <CheckCircle2 size={12} /> Documento cargado ✓
+                      </span>
+                    )}
+                  </div>
+                </Field>
+              </div>
+            )}
           </div>
 
-          {/* CONDICIONES */}
           <div>
             <p className="form-section-title">Condiciones del Préstamo</p>
             <div className="grid grid-cols-3 gap-3">
               <Field label="Monto Solicitado (RD$)" required>
                 <input className="input" type="number" placeholder="0.00"
-                  value={form.amount_requested||''} onChange={e=>fc('amount_requested',e.target.value)} />
+                  value={form.amount_requested||''} onChange={e=>fc('amount_requested',e.target.value)}
+                  readOnly={!!selected} />
               </Field>
               <Field label="Tasa Mensual (%)" required>
                 <input className="input" type="number" step="0.1" placeholder="3"
@@ -378,7 +402,6 @@ async function fetchClients() {
                 </select>
               </Field>
             </div>
-
             <div className="grid grid-cols-2 gap-3 mt-3">
               <Field label="Plazo" required>
                 <select className="select" value={form.term_months||3} onChange={e=>fc('term_months',parseFloat(e.target.value))}>
@@ -391,7 +414,6 @@ async function fetchClients() {
                   value={form.monthly_income||''} onChange={e=>fc('monthly_income',e.target.value)} />
               </Field>
             </div>
-
             <div className="mt-3">
               <Field label="Propósito del préstamo" required>
                 <input className="input" placeholder="Ej: Capital de trabajo, Compra de mercancía..."
@@ -400,7 +422,6 @@ async function fetchClients() {
             </div>
           </div>
 
-          {/* SIMULADOR REDUCTIVO DE CUOTAS */}
           {analisis.cuotas.length > 0 && (
             <div className="bg-hpa-slate-1 rounded-xl p-4 border border-hpa-slate-3 space-y-3">
               <div className="flex justify-between items-center">
@@ -412,11 +433,9 @@ async function fetchClients() {
                 </div>
                 <button type="button" className="text-xs text-hpa-700 font-semibold underline"
                   onClick={() => setShowSchedule(!showSchedule)}>
-                  {showSchedule ? 'Ocultar' : `Ver desglose`}
+                  {showSchedule ? 'Ocultar' : 'Ver desglose'}
                 </button>
               </div>
-
-              {/* Resumen reductivo */}
               <div className="grid grid-cols-4 gap-2 text-center bg-white p-3 rounded-lg border border-hpa-slate-2 text-xs">
                 <div>
                   <p className="text-hpa-slate-5">Cuota {tipoLabel[form.frequency]}</p>
@@ -435,30 +454,18 @@ async function fetchClients() {
                   <p className="font-bold text-amber-600">RD$ {balancePendiente.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                 </div>
               </div>
-
-              {/* Tabla reductiva interactiva */}
               {showSchedule && (
                 <div className="max-h-52 overflow-y-auto bg-white rounded-lg border border-hpa-slate-2">
                   <table className="table text-[11px] w-full">
                     <thead>
-                      <tr>
-                        <th>Período</th>
-                        <th>Monto Cuota</th>
-                        <th>Balance Restante</th>
-                        <th>Estado</th>
-                        <th>Acción</th>
-                      </tr>
+                      <tr><th>Período</th><th>Monto Cuota</th><th>Balance Restante</th><th>Estado</th><th>Acción</th></tr>
                     </thead>
                     <tbody>
                       {analisis.cuotas.map((c, i) => (
                         <tr key={c.num} className={c.pagado ? 'bg-emerald-50/60' : ''}>
                           <td className="font-medium">{c.label}</td>
-                          <td className="font-semibold font-numeric">
-                            RD$ {c.monto.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="text-hpa-slate-5 font-numeric">
-                            RD$ {c.saldoRestante.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                          </td>
+                          <td className="font-semibold font-numeric">RD$ {c.monto.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                          <td className="text-hpa-slate-5 font-numeric">RD$ {c.saldoRestante.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                           <td>
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${c.pagado ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
                               {c.pagado ? 'PAGADO' : 'PENDIENTE'}
@@ -479,7 +486,6 @@ async function fetchClients() {
             </div>
           )}
 
-          {/* NOTAS */}
           <div>
             <Field label="Notas del Analista">
               <textarea className="input h-16 resize-none"
@@ -487,9 +493,10 @@ async function fetchClients() {
                 value={form.analyst_notes||''} onChange={e=>fc('analyst_notes',e.target.value)} />
             </Field>
           </div>
-
         </div>
       </Modal>
     </div>
   )
 }
+ENDOFFILE
+echo "OK: $(wc -l < /mnt/user-data/outputs/Loans.jsx) líneas"
