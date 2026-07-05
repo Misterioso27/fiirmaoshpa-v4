@@ -27,21 +27,18 @@ function Investments() {
     if (!companyId) return
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('investments')
-        .select('id, investor_name, investor_code, principal_amount, current_balance, annual_rate, status, currency')
-        .eq('company_id', companyId)
-        .order('investor_name', { ascending: true })
-
-      if (error) throw error
-      setInvestmentsList(data || [])
-      if (data?.length > 0 && !selectedInvestment) {
-        loadInvestmentDetails(data[0])
-      }
-    } catch (err) {
-      console.error('Error cargando inversiones:', err.message)
-    }
-    setLoading(false)
+      const { data, error, count } = await supabase
+  .from('investments')
+  .select(`
+    id, investment_code, currency, amount,
+    current_balance, accrued_yield, rate_monthly,
+    tier, status, opened_at, maturity_date,
+    clients(first_name, last_name, client_code),
+    financial_products(name)
+  `, { count: 'exact' })
+  .eq('company_id', companyId)
+  .range(offset, offset + limit - 1)
+  .order('created_at', { ascending: false })
   }, [companyId, selectedInvestment])
 
   const loadInvestmentDetails = async (investment) => {
