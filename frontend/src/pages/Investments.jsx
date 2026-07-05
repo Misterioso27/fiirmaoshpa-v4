@@ -1,240 +1,144 @@
 import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, Landmark, Plus, RefreshCw } from 'lucide-react'
-import { supabase, fmt, fmtDate } from '@/lib/supabase'
-import { Modal, Field, Spinner, Empty } from '@/components/ui'
+import { TrendingUp } from 'lucide-react'
+import { supabase, fmt, fmtDate, fmtPercent } from '@/lib/supabase'
+import { StatusBadge, Pagination, Empty, Spinner, Field } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
-function Investments() {
+export default function Investments() {
   const { user } = useAuthStore()
-  const companyId = user?.company?.id
+  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
 
-  const [loading, setLoading] = useState(false)
-  const [investmentsList, setInvestmentsList] = useState([])
-  const [selectedInvestment, setSelectedInvestment] = useState(null)
-  const [yields, setYields] = useState([])
-  const [loadingDetails, setLoadingDetails] = useState(false)
+  const [investments, setInvestments] = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [page, setPage]         = useState(1)
+  const [pagination, setPagination] = useState({})
+  const [status, setStatus]     = useState('')
+  const [simAmount, setSimAmount]   = useState(100000)
+  const [simRate, setSimRate]       = useState(3)
+  const [simMonths, setSimMonths]   = useState(12)
 
-  const [showMovementModal, setShowMovementModal] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [movementForm, setMovementForm] = useState({
-    type: 'deposit',
-    amount: '',
-    reference: '',
-    notes: ''
-  })
-
-  const loadInvestments = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!companyId) return
     setLoading(true)
     try {
-      const { data, error, count } = await supabase
-  .from('investments')
-  .select(`
-    id, investment_code, currency, amount,
-    current_balance, accrued_yield, rate_monthly,
-    tier, status, opened_at, maturity_date,
-    clients(first_name, last_name, client_code),
-    financial_products(name)
-  `, { count: 'exact' })
-  .eq('company_id', companyId)
-  .range(offset, offset + limit - 1)
-  .order('created_at', { ascending: false })
-  }, [companyId, selectedInvestment])
-
-  const loadInvestmentDetails = async (investment) => {
-    setSelectedInvestment(investment)
-    setLoadingDetails(true)
-    try {
-      const { data, error } = await supabase
-        .from('investment_yields')
-        .select('*')
-        .eq('investment_id', investment.id)
-        .order('period_end', { ascending: false })
-
-      if (error) throw error
-      setYields(data || [])
-    } catch (err) {
-      console.error('Error cargando rendimientos:', err.message)
-    }
-    setLoadingDetails(false)
-  }
-
-  useEffect(() => {
-    if (companyId) loadInvestments()
-  }, [companyId, loadInvestments])
-
-  const handleApplyMovement = async (e) => {
-    e.preventDefault()
-    const monto = parseFloat(movementForm.amount)
-    if (isNaN(monto) || monto <= 0) {
-      alert('Ingrese un monto válido mayor a cero.')
-      return
-    }
-
-    setSubmitting(true)
-    try {
-      const { error: moveErr } = await supabase
-        .from('investment_movements')
-        .insert([{
-          investment_id: selectedInvestment.id,
-          type: movementForm.type,
-          amount: monto,
-          reference: movementForm.reference || null,
-          notes: movementForm.notes || null,
-          created_by: user.id
-        }])
-
-      if (moveErr) throw moveErr
-
-      const esDeposito = movementForm.type === 'deposit'
-      const factor = esDeposito ? 1 : -1
-      const nuevoPrincipal = esDeposito ? parseFloat(selectedInvestment.principal_amount) + monto : parseFloat(selectedInvestment.principal_amount)
-      const nuevoBalance = parseFloat(selectedInvestment.current_balance) + (monto * factor)
-
-      const { error: invErr } = await supabase
+      const limit = 20
+      const offset = (page - 1) * limit
+      let query = supabase
         .from('investments')
-        .update({ principal_amount: nuevoPrincipal, current_balance: nuevoBalance })
-        .eq('id', selectedInvestment.id)
+        .select(`
+          id, investment_code, currency, amount,
+          current_balance, accrued_yield, rate_monthly,
+          tier, status, opened_at, maturity_date,
+          clients(first_name, last_name, client_code),
+          financial_products(name)
+        `, { count: 'exact' })
+        .eq('company_id', companyId)
+        .range(offset, offset + limit - 1)
+        .order('created_at', { ascending: false })
 
-      if (invErr) throw invErr
+      if (status) query = query.eq('status', status)
 
-      alert('¡Movimiento procesado con éxito!')
-      setShowMovementModal(false)
-      setMovementForm({ type: 'deposit', amount: '', reference: '', notes: '' })
-      
-      const updatedInv = { ...selectedInvestment, principal_amount: nuevoPrincipal, current_balance: nuevoBalance }
-      setSelectedInvestment(updatedInv)
-      loadInvestments()
-      loadInvestmentDetails(updatedInv)
+      const { data, error, count } = await query
+      if (!error) {
+        setInvestments(data || [])
+        setPagination({ total: count, page, limit, pages: Math.ceil((count || 0) / limit) })
+      }
     } catch (err) {
-      alert('Error procesando movimiento: ' + err.message)
+      console.error('Error cargando inversiones:', err)
     }
-    setSubmitting(false)
-  }
+    setLoading(false)
+  }, [page, status, companyId])
+
+  useEffect(() => { load() }, [load])
+
+  const simFinal = simAmount * Math.pow(1 + simRate / 100, simMonths)
+  const simYield = simFinal - simAmount
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-hpa-slate-2 shadow-sm">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-hpa-slate-9">Inversionistas y Fondeo</h2>
-          <p className="text-xs text-hpa-slate-5 mt-0.5">Control de capital social y liquidación de rendimientos</p>
+          <h2 className="text-xl font-bold text-hpa-slate-9">Inversiones</h2>
+          <p className="text-xs text-hpa-slate-5 mt-0.5">{pagination.total || 0} depósitos registrados</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        <div className="lg:col-span-5 space-y-4">
-          <div className="card p-0 overflow-hidden">
-            <div className="p-3 bg-hpa-slate-1 border-b border-hpa-slate-2 flex justify-between items-center">
-              <p className="text-xs font-bold text-hpa-slate-6 uppercase">Cuentas de Fondeo</p>
-              <button onClick={loadInvestments} className="btn btn-ghost p-1">
-                <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-              </button>
-            </div>
-            
-            <div className="divide-y divide-hpa-slate-2 max-h-[500px] overflow-y-auto">
+      {/* Simulador */}
+      <div className="card bg-gradient-to-r from-hpa-900 to-hpa-700 text-white">
+        <h3 className="text-sm font-semibold mb-4 text-hpa-gold">Simulador de Rendimiento</h3>
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <Field label={<span className="text-white/60">Capital (DOP)</span>}>
+            <input className="input bg-white/10 border-white/20 text-white" type="number"
+              value={simAmount} onChange={e => setSimAmount(+e.target.value)} />
+          </Field>
+          <Field label={<span className="text-white/60">Tasa mensual (%)</span>}>
+            <input className="input bg-white/10 border-white/20 text-white" type="number" step="0.1"
+              value={simRate} onChange={e => setSimRate(+e.target.value)} />
+          </Field>
+          <Field label={<span className="text-white/60">Plazo (meses)</span>}>
+            <input className="input bg-white/10 border-white/20 text-white" type="number"
+              value={simMonths} onChange={e => setSimMonths(+e.target.value)} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-3 gap-4 pt-4 border-t border-white/20">
+          <div><p className="text-xs text-white/50 mb-0.5">Capital</p><p className="text-lg font-bold font-numeric">{fmt(simAmount)}</p></div>
+          <div><p className="text-xs text-white/50 mb-0.5">Rendimiento</p><p className="text-lg font-bold font-numeric text-hpa-gold">{fmt(simYield)}</p></div>
+          <div><p className="text-xs text-white/50 mb-0.5">Total final</p><p className="text-lg font-bold font-numeric text-emerald-400">{fmt(simFinal)}</p></div>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="card p-4 flex gap-3">
+        <select className="select w-40" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}>
+          <option value="">Todos</option>
+          {['active','paused','closed','liquidated'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {/* Tabla */}
+      <div className="card p-0 overflow-hidden">
+        <div className="table-wrapper">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Código</th><th>Cliente</th><th>Moneda</th><th>Monto</th>
+                <th>Tasa</th><th>Saldo</th><th>Rendimiento</th><th>Tier</th>
+                <th>Estado</th><th>Apertura</th>
+              </tr>
+            </thead>
+            <tbody>
               {loading ? (
-                <div className="p-8 text-center"><Spinner size={20} className="mx-auto" /></div>
-              ) : investmentsList.map(inv => (
-                <div key={inv.id} onClick={() => loadInvestmentDetails(inv)} className={`p-3 text-xs cursor-pointer transition-colors flex items-center justify-between ${selectedInvestment?.id === inv.id ? 'bg-hpa-slate-2 border-l-4 border-hpa-700' : 'hover:bg-hpa-slate-1'}`}>
-                  <div>
-                    <p className="font-mono font-bold text-hpa-700">{inv.investor_code}</p>
-                    <p className="font-bold text-hpa-slate-8 mt-0.5">{inv.investor_name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-hpa-slate-9 font-numeric">{fmt(inv.current_balance, inv.currency)}</p>
-                  </div>
-                </div>
+                <tr><td colSpan={10} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
+              ) : investments.length === 0 ? (
+                <tr><td colSpan={10}>
+                  <Empty icon={TrendingUp} title="Sin inversiones" desc="No hay depósitos registrados aún" />
+                </td></tr>
+              ) : investments.map(inv => (
+                <tr key={inv.id}>
+                  <td className="font-mono text-xs font-semibold text-hpa-700">{inv.investment_code}</td>
+                  <td>
+                    <p className="font-medium">{inv.clients?.first_name} {inv.clients?.last_name}</p>
+                    <p className="text-xs text-hpa-slate-5">{inv.clients?.client_code}</p>
+                  </td>
+                  <td><span className="badge badge-blue">{inv.currency}</span></td>
+                  <td className="font-numeric">{fmt(inv.amount, inv.currency)}</td>
+                  <td className="font-numeric text-hpa-700 font-semibold">{fmtPercent(inv.rate_monthly)}</td>
+                  <td className="font-numeric font-semibold">{fmt(inv.current_balance, inv.currency)}</td>
+                  <td className="font-numeric text-emerald-600 font-semibold">{fmt(inv.accrued_yield, inv.currency)}</td>
+                  <td>
+                    <span className={`badge ${inv.tier === 'premium' ? 'badge-gold' : inv.tier === 'corporate' ? 'badge-blue' : 'badge-gray'}`}>
+                      {inv.tier}
+                    </span>
+                  </td>
+                  <td><StatusBadge status={inv.status} /></td>
+                  <td className="text-xs text-hpa-slate-5">{fmtDate(inv.opened_at)}</td>
+                </tr>
               ))}
-            </div>
-          </div>
+            </tbody>
+          </table>
         </div>
-
-        <div className="lg:col-span-7">
-          {selectedInvestment ? (
-            <div className="space-y-4 animate-fade-in">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="card p-4 bg-white border border-hpa-slate-2 flex justify-between items-center">
-                  <div>
-                    <p className="text-[10px] text-hpa-slate-4 font-bold uppercase">Capital Semilla</p>
-                    <p className="text-lg font-black text-hpa-slate-9 font-numeric mt-1">{fmt(selectedInvestment.principal_amount, selectedInvestment.currency)}</p>
-                  </div>
-                  <div className="p-2 bg-hpa-slate-1 rounded-lg"><Landmark size={18} /></div>
-                </div>
-
-                <div className="card p-4 bg-emerald-950 text-white border-0 flex justify-between items-center">
-                  <div>
-                    <p className="text-[10px] text-emerald-300 font-bold uppercase">Balance Líquido</p>
-                    <p className="text-lg font-black text-emerald-400 font-numeric mt-1">{fmt(selectedInvestment.current_balance, selectedInvestment.currency)}</p>
-                  </div>
-                  <button onClick={() => setShowMovementModal(true)} className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold px-3 flex items-center gap-1">
-                    <Plus size={12} /> Transaccionar
-                  </button>
-                </div>
-              </div>
-
-              <div className="card p-0">
-                <div className="p-4 border-b border-hpa-slate-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-hpa-slate-7">Historial de Rendimientos Generados</h3>
-                </div>
-                <div className="table-wrapper">
-                  <table className="table text-xs">
-                    <thead>
-                      <tr>
-                        <th>Período</th>
-                        <th>Tasa</th>
-                        <th className="text-right">Rendimiento Ganado</th>
-                        <th className="text-right">Balance de Cierre</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loadingDetails ? (
-                        <tr><td colSpan={4} className="py-8 text-center"><Spinner size={14} className="mx-auto" /></td></tr>
-                      ) : yields.length === 0 ? (
-                        <tr><td colSpan={4} className="py-8 text-center"><Empty icon={TrendingUp} title="Sin rendimientos" desc="No hay cortes de ganancias aplicados aún." /></td></tr>
-                      ) : yields.map(yd => (
-                        <tr key={yd.id}>
-                          <td>{fmtDate(yd.period_start)} al {fmtDate(yd.period_end)}</td>
-                          <td>{yd.rate_applied}%</td>
-                          <td className="text-right text-emerald-600 font-bold font-numeric">+{fmt(yd.yield_amount, selectedInvestment.currency)}</td>
-                          <td className="text-right font-numeric">{fmt(yd.closing_balance, selectedInvestment.currency)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="card py-16 text-center text-xs text-hpa-slate-4">Seleccione una cuenta de fondeo.</div>
-          )}
-        </div>
+        <Pagination page={page} pages={pagination.pages} total={pagination.total} limit={20} onChange={setPage} />
       </div>
-
-      <Modal open={showMovementModal} onClose={() => setShowMovementModal(false)} title="Registrar Movimiento de Capital" footer={
-        <>
-          <button className="btn btn-ghost" onClick={() => setShowMovementModal(false)}>Cancelar</button>
-          <button className="btn btn-primary" onClick={handleApplyMovement} disabled={submitting}>
-            {submitting ? <Spinner size={14} /> : 'Aplicar Movimiento'}
-          </button>
-        </>
-      }>
-        <div className="space-y-4">
-          <Field label="Tipo de Movimiento" required>
-            <select className="select" value={movementForm.type} onChange={e => setMovementForm(p => ({ ...p, type: e.target.value }))}>
-              <option value="deposit">Aporte / Inyección de Capital (+)</option>
-              <option value="withdrawal">Retiro / Reducción de Capital (-)</option>
-            </select>
-          </Field>
-          <Field label="Monto" required>
-            <input type="number" step="0.01" className="input" placeholder="0.00" value={movementForm.amount} onChange={e => setMovementForm(p => ({ ...p, amount: e.target.value }))} />
-          </Field>
-          <Field label="Referencia u Orden">
-            <input type="text" className="input" placeholder="Ej. Depósito bancario #..." value={movementForm.reference} onChange={e => setMovementForm(p => ({ ...p, reference: e.target.value }))} />
-          </Field>
-        </div>
-      </Modal>
     </div>
   )
 }
-
-export default Investments
