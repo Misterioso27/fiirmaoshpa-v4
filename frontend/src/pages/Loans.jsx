@@ -724,5 +724,3 @@ export default function Loans() {
     </div>
   )
 }
-ENDOFFILE
-echo "OK: $(wc -l < /mnt/user-data/outputs/Loans.jsx) líneas"
