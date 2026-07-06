@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/Loans.jsx << 'ENDOFFILE'
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, CreditCard, Calculator, Upload, ShieldAlert, CheckCircle2, Edit2, CheckSquare, XSquare } from 'lucide-react'
 import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
