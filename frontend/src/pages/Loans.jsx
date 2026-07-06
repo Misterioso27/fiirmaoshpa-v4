@@ -11,6 +11,7 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
   const tiempo = parseFloat(meses)
   let totalCuotas = 0
   let etiqueta = 'Cuota'
+  
   if (frecuencia === 'weekly') {
     totalCuotas = (tiempo === 2.5) ? 10 : 12
     etiqueta = 'Semana'
@@ -21,10 +22,12 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
     totalCuotas = 3
     etiqueta = 'Mes'
   }
+  
   const totalInteres = p * rm
   const totalPagar = p + totalInteres
   const montoCuota = Math.round((totalPagar / totalCuotas) * 100) / 100
   let errorMsg = '', warningMsg = ''
+  
   if (ingresoNeto && parseFloat(ingresoNeto) > 0) {
     const ingreso = parseFloat(ingresoNeto)
     const cuotaMensualEquiv = frecuencia === 'weekly'
@@ -40,11 +43,34 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
       }
     }
   }
+
   const listado = []
   let saldo = totalPagar
+  
+  // Generación dinámica de fechas del cronograma
+  const fechaBase = new Date()
+  
   for (let i = 1; i <= totalCuotas; i++) {
     saldo = Math.max(0, saldo - montoCuota)
-    listado.push({ num: i, label: `${etiqueta} ${i}`, monto: montoCuota, saldoRestante: Math.round(saldo * 100) / 100, pagado: false })
+    
+    // Cálculo secuencial exacto del vencimiento en Frontend
+    const fechaVencimiento = new Date(fechaBase)
+    if (frecuencia === 'weekly') {
+      fechaVencimiento.setDate(fechaBase.getDate() + (i * 7))
+    } else if (frecuencia === 'biweekly') {
+      fechaVencimiento.setDate(fechaBase.getDate() + (i * 15))
+    } else {
+      fechaVencimiento.setMonth(fechaBase.getMonth() + i)
+    }
+
+    listado.push({ 
+      num: i, 
+      label: `${etiqueta} ${i}`, 
+      monto: montoCuota, 
+      saldoRestante: Math.round(saldo * 100) / 100, 
+      pagado: false,
+      fecha: fechaVencimiento
+    })
   }
   return { cuotas: listado, error: errorMsg, warning: warningMsg, montoCuota }
 }
@@ -194,18 +220,27 @@ export default function Loans() {
         if (!form[campo]) throw new Error(`El campo "${label}" es obligatorio`)
       }
 
-      // EDITAR solicitud existente
       if (selected?.id) {
-        await supabase
+        // EDITAR: Mapeo exacto basado en el esquema real de PostgreSQL
+        const { error } = await supabase
           .from('loan_applications')
           .update({
             purpose:        form.purpose,
             analyst_notes:  form.analyst_notes || null,
             monthly_income: parseFloat(form.monthly_income),
             type:           form.type,
+            ai_analysis: {
+              frequency:            form.frequency,
+              rate_monthly:         parseFloat(form.rate_monthly),
+              total_periods:        analisis.cuotas.length,
+              cuota_individual:     analisis.montoCuota,
+              requiere_autorizacion: !!analisis.warning
+            }
           })
           .eq('id', selected.id)
           .eq('status', 'submitted')
+
+        if (error) throw error
       } else {
         // CREAR nueva solicitud
         const estadoInicial = analisis.warning ? 'in_review' : 'submitted'
@@ -218,6 +253,7 @@ export default function Loans() {
           term_months:      parseFloat(form.term_months),
           purpose:          form.purpose,
           monthly_income:   parseFloat(form.monthly_income),
+          status:           estadoInicial,
           analyst_notes:    analisis.warning
             ? `[AUTORIZACIÓN REQUERIDA]: ${form.analyst_notes || ''}`
             : form.analyst_notes || null,
@@ -457,12 +493,13 @@ export default function Loans() {
                 <div className="max-h-52 overflow-y-auto bg-white rounded-lg border border-hpa-slate-2">
                   <table className="table text-[11px] w-full">
                     <thead>
-                      <tr><th>Período</th><th>Monto Cuota</th><th>Balance Restante</th><th>Estado</th><th>Acción</th></tr>
+                      <tr><th>Período</th><th>Fecha Venc.</th><th>Monto Cuota</th><th>Balance Restante</th><th>Estado</th><th>Acción</th></tr>
                     </thead>
                     <tbody>
                       {analisis.cuotas.map((c, i) => (
                         <tr key={c.num} className={c.pagado ? 'bg-emerald-50/60' : ''}>
                           <td className="font-medium">{c.label}</td>
+                          <td className="text-hpa-slate-6 font-semibold">{c.fecha.toLocaleDateString('es-DO', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                           <td className="font-semibold font-numeric">RD$ {c.monto.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                           <td className="text-hpa-slate-5 font-numeric">RD$ {c.saldoRestante.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                           <td>
