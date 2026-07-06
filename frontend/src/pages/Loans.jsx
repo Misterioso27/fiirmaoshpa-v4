@@ -187,7 +187,7 @@ export default function Loans() {
     setApproveForm({
       approved_amount: item.amount_requested,
       approved_rate: item.ai_analysis?.rate_monthly || 30,
-      approved_term: item.term_months,
+      approved_term: item.term_months, // Se carga el valor original (ej: 2.5)
       frequency: item.ai_analysis?.frequency || 'monthly',
       disbursement_date: new Date().toISOString().split('T')[0],
       conditions: ''
@@ -229,8 +229,9 @@ export default function Loans() {
         if (!form[campo]) throw new Error(`El campo "${label}" es obligatorio`)
       }
       
-      // Capturamos el plazo de texto dinámico calculado directamente por el simulador del modal
       const plazoFinalTexto = analisis.plazoTexto || `${form.term_months} meses`;
+      // Truco del redondeo para que pase limpio por la columna entera de Supabase
+      const plazoParaBaseDatos = form.term_months === 2.5 ? 3 : Math.round(form.term_months);
 
       if (selected?.id) {
         await supabase.from('loan_applications')
@@ -239,8 +240,7 @@ export default function Loans() {
             analyst_notes: form.analyst_notes || null,
             monthly_income: parseFloat(form.monthly_income),
             type: form.type,
-            term_months: parseFloat(form.term_months),
-            // Forzamos la persistencia en la columna que lee la tabla principal
+            term_months: plazoParaBaseDatos,
             term_text: plazoFinalTexto 
           })
           .eq('id', selected.id)
@@ -252,7 +252,7 @@ export default function Loans() {
           type: form.type || 'personal',
           amount_requested: parseFloat(form.amount_requested),
           currency: form.currency || 'DOP',
-          term_months: parseFloat(form.term_months),
+          term_months: plazoParaBaseDatos, // Redondeado a 3 en la BD
           purpose: form.purpose,
           monthly_income: parseFloat(form.monthly_income),
           monthly_expenses: form.monthly_expenses ? parseFloat(form.monthly_expenses) : null,
@@ -261,6 +261,7 @@ export default function Loans() {
           analyst_notes: analisis.warning
             ? `[AUTORIZACIÓN REQUERIDA]: ${form.analyst_notes || ''}` : form.analyst_notes || null,
           status: estadoInicial,
+          term_text: plazoFinalTexto, // Aquí queda guardado "2.5 Meses" intacto para que todos lo vean
           ai_analysis: {
             frequency: form.frequency,
             rate_monthly: parseFloat(form.rate_monthly),
@@ -287,14 +288,17 @@ export default function Loans() {
     try {
       const monto = parseFloat(approveForm.approved_amount)
       const tasa = parseFloat(approveForm.approved_rate) / 100
-      const meses = parseFloat(approveForm.approved_term)
+      const mesesOriginal = parseFloat(approveForm.approved_term) 
       const freq = approveForm.frequency
       const fechaBase = new Date(approveForm.disbursement_date + 'T00:00:00')
 
-      let totalCuotas = 0, diasPeriodo = 30
-      if (freq === 'weekly') { totalCuotas = (meses <= 2.5) ? 10 : 12; diasPeriodo = 7 }
-      else if (freq === 'biweekly') { totalCuotas = (meses <= 2.5) ? 5 : 6; diasPeriodo = 15 }
-      else { totalCuotas = meses; diasPeriodo = 30 }
+      // Para Supabase lo enviamos como entero (3) evitando errores de sintaxis
+      const mesesParaBaseDatos = mesesOriginal === 2.5 ? 3 : Math.round(mesesOriginal)
+
+      let totalCuotas = 0, diasPeriodo = 7
+      if (freq === 'weekly') { totalCuotas = (mesesOriginal <= 2.5) ? 10 : 12; diasPeriodo = 7 }
+      else if (freq === 'biweekly') { totalCuotas = (mesesOriginal <= 2.5) ? 5 : 6; diasPeriodo = 15 }
+      else { totalCuotas = mesesOriginal; diasPeriodo = 30 }
 
       const totalInteres = monto * tasa
       const totalPagar = monto + totalInteres
@@ -306,7 +310,7 @@ export default function Loans() {
         status: 'approved',
         approved_amount: monto,
         approved_rate: parseFloat(approveForm.approved_rate),
-        approved_term: meses,
+        approved_term: mesesParaBaseDatos, 
         approved_by: user.id,
         approved_at: new Date().toISOString(),
         conditions: approveForm.conditions || null
@@ -334,7 +338,8 @@ export default function Loans() {
           principal: monto,
           rate_monthly: parseFloat(approveForm.approved_rate),
           rate_annual: parseFloat(approveForm.approved_rate) * 12,
-          term_months: meses,
+          term_months: mesesParaBaseDatos, // Enviado como 3
+          term_text: mesesOriginal === 2.5 ? '2.5 Meses' : `${mesesOriginal} Meses`, // Persiste el texto original
           payment_amount: cuotaMonto,
           total_interest: totalInteres,
           total_amount: totalPagar,
@@ -486,8 +491,7 @@ export default function Loans() {
                     <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
                   </td>
                   <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
-                  {/* Se lee dinámicamente la columna term_text guardada */}
-                  <td>{item.term_text || `${item.term_months} meses`}</td>
+                  <td>{item.term_text || (item.term_months === 3 && item.ai_analysis?.frequency === 'weekly' ? '2.5 Meses' : `${item.term_months} meses`)}</td>
                   <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
                   <td><StatusBadge status={item.status} /></td>
                   <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
@@ -690,6 +694,7 @@ export default function Loans() {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
+              {/* Aquí se despliega la opción exacta y limpia con decimales tal como solicitaste */}
               <Field label="Plazo (meses)" required>
                 <select className="select" value={approveForm.approved_term||3} onChange={e=>afc('approved_term',parseFloat(e.target.value))}>
                   <option value={2.5}>2.5 Meses</option>
