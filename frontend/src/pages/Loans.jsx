@@ -139,7 +139,7 @@ export default function Loans() {
     const cid = companyId
     setForm({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
     setSelected(null)
-    setIdDocUrl('')
+    idDocUrl && setIdDocUrl('')
     setShowSchedule(false)
     setShowModal(true)
     async function fetchClients() {
@@ -187,7 +187,7 @@ export default function Loans() {
     setApproveForm({
       approved_amount: item.amount_requested,
       approved_rate: item.ai_analysis?.rate_monthly || 30,
-      approved_term: item.term_months, // Se carga el valor original (ej: 2.5)
+      approved_term: item.term_months === 3 && item.term_text?.includes('2.5') ? 2.5 : item.term_months,
       frequency: item.ai_analysis?.frequency || 'monthly',
       disbursement_date: new Date().toISOString().split('T')[0],
       conditions: ''
@@ -230,7 +230,6 @@ export default function Loans() {
       }
       
       const plazoFinalTexto = analisis.plazoTexto || `${form.term_months} meses`;
-      // Truco del redondeo para que pase limpio por la columna entera de Supabase
       const plazoParaBaseDatos = form.term_months === 2.5 ? 3 : Math.round(form.term_months);
 
       if (selected?.id) {
@@ -252,7 +251,7 @@ export default function Loans() {
           type: form.type || 'personal',
           amount_requested: parseFloat(form.amount_requested),
           currency: form.currency || 'DOP',
-          term_months: plazoParaBaseDatos, // Redondeado a 3 en la BD
+          term_months: plazoParaBaseDatos, 
           purpose: form.purpose,
           monthly_income: parseFloat(form.monthly_income),
           monthly_expenses: form.monthly_expenses ? parseFloat(form.monthly_expenses) : null,
@@ -261,7 +260,7 @@ export default function Loans() {
           analyst_notes: analisis.warning
             ? `[AUTORIZACIÓN REQUERIDA]: ${form.analyst_notes || ''}` : form.analyst_notes || null,
           status: estadoInicial,
-          term_text: plazoFinalTexto, // Aquí queda guardado "2.5 Meses" intacto para que todos lo vean
+          term_text: plazoFinalTexto, 
           ai_analysis: {
             frequency: form.frequency,
             rate_monthly: parseFloat(form.rate_monthly),
@@ -292,7 +291,6 @@ export default function Loans() {
       const freq = approveForm.frequency
       const fechaBase = new Date(approveForm.disbursement_date + 'T00:00:00')
 
-      // Para Supabase lo enviamos como entero (3) evitando errores de sintaxis
       const mesesParaBaseDatos = mesesOriginal === 2.5 ? 3 : Math.round(mesesOriginal)
 
       let totalCuotas = 0, diasPeriodo = 7
@@ -338,8 +336,7 @@ export default function Loans() {
           principal: monto,
           rate_monthly: parseFloat(approveForm.approved_rate),
           rate_annual: parseFloat(approveForm.approved_rate) * 12,
-          term_months: mesesParaBaseDatos, // Enviado como 3
-          term_text: mesesOriginal === 2.5 ? '2.5 Meses' : `${mesesOriginal} Meses`, // Persiste el texto original
+          term_months: mesesParaBaseDatos, 
           payment_amount: cuotaMonto,
           total_interest: totalInteres,
           total_amount: totalPagar,
@@ -351,7 +348,10 @@ export default function Loans() {
           next_payment_date: primerPago.toISOString().split('T')[0],
           status: 'active',
           days_overdue: 0,
-          disbursed_by: user.id
+          disbursed_by: user.id,
+          ai_analysis: {
+            custom_term_text: mesesOriginal === 2.5 ? '2.5 Meses' : `${mesesOriginal} Meses`
+          }
         })
         .select()
         .single()
@@ -481,39 +481,45 @@ export default function Loans() {
                 <tr><td colSpan={8}>
                   <Empty icon={CreditCard} title="Sin registros" desc="Registra la primera solicitud de préstamo" />
                 </td></tr>
-              ) : items.map(item => (
-                <tr key={item.id}>
-                  <td className="font-mono text-xs font-semibold text-hpa-700">
-                    {item.application_code || item.loan_code}
-                  </td>
-                  <td>
-                    <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
-                    <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
-                  </td>
-                  <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
-                  <td>{item.term_text || (item.term_months === 3 && item.ai_analysis?.frequency === 'weekly' ? '2.5 Meses' : `${item.term_months} meses`)}</td>
-                  <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
-                  <td><StatusBadge status={item.status} /></td>
-                  <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
-                  <td>
-                    <div className="flex gap-1">
-                      {(item.status === 'submitted' || item.status === 'in_review') && (
-                        <>
-                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => openEdit(item)}>
-                            <Edit2 size={13} />
-                          </button>
-                          <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar y Desembolsar" onClick={() => openApprove(item)}>
-                            <CheckSquare size={13} />
-                          </button>
-                          <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar" onClick={() => rejectApplication(item)}>
-                            <XSquare size={13} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              ) : items.map(item => {
+                let displayPlazo = item.term_text || `${item.term_months} meses`;
+                if (!item.term_text && item.ai_analysis?.custom_term_text) {
+                  displayPlazo = item.ai_analysis.custom_term_text;
+                }
+                return (
+                  <tr key={item.id}>
+                    <td className="font-mono text-xs font-semibold text-hpa-700">
+                      {item.application_code || item.loan_code}
+                    </td>
+                    <td>
+                      <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
+                      <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
+                    </td>
+                    <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
+                    <td>{displayPlazo}</td>
+                    <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
+                    <td><StatusBadge status={item.status} /></td>
+                    <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
+                    <td>
+                      <div className="flex gap-1">
+                        {(item.status === 'submitted' || item.status === 'in_review') && (
+                          <>
+                            <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => openEdit(item)}>
+                              <Edit2 size={13} />
+                            </button>
+                            <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar y Desembolsar" onClick={() => openApprove(item)}>
+                              <CheckSquare size={13} />
+                            </button>
+                            <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar" onClick={() => rejectApplication(item)}>
+                              <XSquare size={13} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -694,7 +700,6 @@ export default function Loans() {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {/* Aquí se despliega la opción exacta y limpia con decimales tal como solicitaste */}
               <Field label="Plazo (meses)" required>
                 <select className="select" value={approveForm.approved_term||3} onChange={e=>afc('approved_term',parseFloat(e.target.value))}>
                   <option value={2.5}>2.5 Meses</option>
