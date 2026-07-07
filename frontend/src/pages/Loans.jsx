@@ -5,27 +5,24 @@ import { StatusBadge, Modal, Field, Pagination, Empty, Spinner, Tabs } from '@/c
 import useAuthStore from '@/store/auth'
 
 function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto, fechaInicio }) {
-  if (!monto || !tasaMensual || !meses) return { cuotas: [], error: '', warning: '', montoCuota: 0, plazoTexto: '3 meses' }
+  if (!monto || !tasaMensual || !meses) return { cuotas: [], error: '', warning: '', montoCuota: 0 }
   const p = parseFloat(monto)
   const rm = parseFloat(tasaMensual) / 100
   const tiempo = parseFloat(meses)
   let totalCuotas = 0
   let etiqueta = 'Cuota'
   let diasPorPeriodo = 30
-  let plazoTexto = `${meses} meses`
 
   if (frecuencia === 'weekly') {
     totalCuotas = (tiempo === 2.5) ? 10 : 12
     etiqueta = 'Semana'
     diasPorPeriodo = 7
-    plazoTexto = (tiempo === 2.5) ? '2.5 Meses (10 cuotas)' : '3 Meses (12 cuotas)'
   } else if (frecuencia === 'biweekly') {
     totalCuotas = (tiempo === 2.5) ? 5 : 6
     etiqueta = 'Quincena'
     diasPorPeriodo = 15
-    plazoTexto = (tiempo === 2.5) ? '2.5 Meses (5 cuotas)' : '3 Meses (6 cuotas)'
   } else {
-    totalCuotas = tiempo
+    totalCuotas = 3
     etiqueta = 'Mes'
     diasPorPeriodo = 30
   }
@@ -56,13 +53,12 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
   let saldo = totalPagar
 
   for (let i = 1; i <= totalCuotas; i++) {
-    const fechaVenc = new Date(base.getTime())
+    const fechaVenc = new Date(base)
     if (frecuencia === 'monthly') {
       fechaVenc.setMonth(fechaVenc.getMonth() + i)
     } else {
       fechaVenc.setDate(fechaVenc.getDate() + (diasPorPeriodo * i))
     }
-    
     saldo = Math.max(0, saldo - montoCuota)
     listado.push({
       num: i,
@@ -71,13 +67,13 @@ function calcularEstructura({ monto, tasaMensual, meses, frecuencia, ingresoNeto
       fechaVencISO: fechaVenc.toISOString().split('T')[0],
       monto: montoCuota,
       principal: Math.round((p / totalCuotas) * 100) / 100,
-      interes: Math.round((totalInteres / totalCuotas) * 100) / 100,
+      interes: Math.round(((totalPagar - p) / totalCuotas) * 100) / 100,
       saldoRestante: Math.round(saldo * 100) / 100,
       pagado: false
     })
   }
 
-  return { cuotas: listado, error: errorMsg, warning: warningMsg, montoCuota, plazoTexto }
+  return { cuotas: listado, error: errorMsg, warning: warningMsg, montoCuota }
 }
 
 export default function Loans() {
@@ -100,7 +96,7 @@ export default function Loans() {
   const [saving, setSaving]     = useState(false)
   const [selected, setSelected] = useState(null)
   const [clients, setClients]   = useState([])
-  const [analisis, setAnalisis] = useState({ cuotas: [], error: '', warning: '', montoCuota: 0, plazoTexto: '3 meses' })
+  const [analisis, setAnalisis] = useState({ cuotas: [], error: '', warning: '', montoCuota: 0 })
   const [showSchedule, setShowSchedule] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [idDocUrl, setIdDocUrl] = useState('')
@@ -139,7 +135,7 @@ export default function Loans() {
     const cid = companyId
     setForm({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 30 })
     setSelected(null)
-    idDocUrl && setIdDocUrl('')
+    setIdDocUrl('')
     setShowSchedule(false)
     setShowModal(true)
     async function fetchClients() {
@@ -187,7 +183,7 @@ export default function Loans() {
     setApproveForm({
       approved_amount: item.amount_requested,
       approved_rate: item.ai_analysis?.rate_monthly || 30,
-      approved_term: item.term_months === 3 && item.term_text?.includes('2.5') ? 2.5 : item.term_months,
+      approved_term: item.term_months,
       frequency: item.ai_analysis?.frequency || 'monthly',
       disbursement_date: new Date().toISOString().split('T')[0],
       conditions: ''
@@ -197,6 +193,13 @@ export default function Loans() {
 
   function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
   function afc(k, v) { setApproveForm(f => ({ ...f, [k]: v })) }
+
+  function alternarCuota(index) {
+    setAnalisis(prev => ({
+      ...prev,
+      cuotas: prev.cuotas.map((c, i) => i === index ? { ...c, pagado: !c.pagado } : c)
+    }))
+  }
 
   const cuotasPagadas    = analisis.cuotas.filter(c => c.pagado).length
   const totalCobrado     = analisis.cuotas.filter(c => c.pagado).reduce((a, c) => a + c.monto, 0)
@@ -228,10 +231,6 @@ export default function Loans() {
       for (const [campo, label] of requeridos) {
         if (!form[campo]) throw new Error(`El campo "${label}" es obligatorio`)
       }
-      
-      const plazoFinalTexto = analisis.plazoTexto || `${form.term_months} meses`;
-      const plazoParaBaseDatos = form.term_months === 2.5 ? 3 : Math.round(form.term_months);
-
       if (selected?.id) {
         await supabase.from('loan_applications')
           .update({
@@ -239,10 +238,8 @@ export default function Loans() {
             analyst_notes: form.analyst_notes || null,
             monthly_income: parseFloat(form.monthly_income),
             type: form.type,
-            term_months: plazoParaBaseDatos,
-            term_text: plazoFinalTexto 
           })
-          .eq('id', selected.id)
+          .eq('id', selected.id).eq('status', 'submitted')
       } else {
         const estadoInicial = analisis.warning ? 'in_review' : 'submitted'
         await db.createLoanApplication({
@@ -251,7 +248,7 @@ export default function Loans() {
           type: form.type || 'personal',
           amount_requested: parseFloat(form.amount_requested),
           currency: form.currency || 'DOP',
-          term_months: plazoParaBaseDatos, 
+          term_months: parseFloat(form.term_months),
           purpose: form.purpose,
           monthly_income: parseFloat(form.monthly_income),
           monthly_expenses: form.monthly_expenses ? parseFloat(form.monthly_expenses) : null,
@@ -259,8 +256,6 @@ export default function Loans() {
             ? parseFloat(form.monthly_income) - parseFloat(form.monthly_expenses) : null,
           analyst_notes: analisis.warning
             ? `[AUTORIZACIÓN REQUERIDA]: ${form.analyst_notes || ''}` : form.analyst_notes || null,
-          status: estadoInicial,
-          term_text: plazoFinalTexto, 
           ai_analysis: {
             frequency: form.frequency,
             rate_monthly: parseFloat(form.rate_monthly),
@@ -287,16 +282,14 @@ export default function Loans() {
     try {
       const monto = parseFloat(approveForm.approved_amount)
       const tasa = parseFloat(approveForm.approved_rate) / 100
-      const mesesOriginal = parseFloat(approveForm.approved_term) 
+      const meses = parseInt(approveForm.approved_term)
       const freq = approveForm.frequency
-      const fechaBase = new Date(approveForm.disbursement_date + 'T00:00:00')
+      const fechaBase = new Date(approveForm.disbursement_date)
 
-      const mesesParaBaseDatos = mesesOriginal === 2.5 ? 3 : Math.round(mesesOriginal)
-
-      let totalCuotas = 0, diasPeriodo = 7
-      if (freq === 'weekly') { totalCuotas = (mesesOriginal <= 2.5) ? 10 : 12; diasPeriodo = 7 }
-      else if (freq === 'biweekly') { totalCuotas = (mesesOriginal <= 2.5) ? 5 : 6; diasPeriodo = 15 }
-      else { totalCuotas = mesesOriginal; diasPeriodo = 30 }
+      let totalCuotas = 0, diasPeriodo = 30
+      if (freq === 'weekly') { totalCuotas = (meses <= 2.5) ? 10 : 12; diasPeriodo = 7 }
+      else if (freq === 'biweekly') { totalCuotas = (meses <= 2.5) ? 5 : 6; diasPeriodo = 15 }
+      else { totalCuotas = meses; diasPeriodo = 30 }
 
       const totalInteres = monto * tasa
       const totalPagar = monto + totalInteres
@@ -304,21 +297,23 @@ export default function Loans() {
       const cuotaPrincipal = Math.round((monto / totalCuotas) * 100) / 100
       const cuotaInteres = Math.round((totalInteres / totalCuotas) * 100) / 100
 
+      // 1. Actualizar solicitud a approved
       await supabase.from('loan_applications').update({
         status: 'approved',
         approved_amount: monto,
         approved_rate: parseFloat(approveForm.approved_rate),
-        approved_term: mesesParaBaseDatos, 
+        approved_term: meses,
         approved_by: user.id,
         approved_at: new Date().toISOString(),
         conditions: approveForm.conditions || null
       }).eq('id', approveItem.id)
 
-      const primerPago = new Date(fechaBase.getTime())
+      // 2. Crear préstamo activo
+      const primerPago = new Date(fechaBase)
       if (freq === 'monthly') primerPago.setMonth(primerPago.getMonth() + 1)
       else primerPago.setDate(primerPago.getDate() + diasPeriodo)
 
-      const ultimoPago = new Date(fechaBase.getTime())
+      const ultimoPago = new Date(fechaBase)
       if (freq === 'monthly') ultimoPago.setMonth(ultimoPago.getMonth() + totalCuotas)
       else ultimoPago.setDate(ultimoPago.getDate() + (diasPeriodo * totalCuotas))
 
@@ -336,7 +331,7 @@ export default function Loans() {
           principal: monto,
           rate_monthly: parseFloat(approveForm.approved_rate),
           rate_annual: parseFloat(approveForm.approved_rate) * 12,
-          term_months: mesesParaBaseDatos, 
+          term_months: meses,
           payment_amount: cuotaMonto,
           total_interest: totalInteres,
           total_amount: totalPagar,
@@ -348,40 +343,32 @@ export default function Loans() {
           next_payment_date: primerPago.toISOString().split('T')[0],
           status: 'active',
           days_overdue: 0,
-          disbursed_by: user.id,
-          ai_analysis: {
-            custom_term_text: mesesOriginal === 2.5 ? '2.5 Meses' : `${mesesOriginal} Meses`
-          }
+          disbursed_by: user.id
         })
         .select()
         .single()
 
       if (loanError) throw new Error('Error al crear préstamo: ' + loanError.message)
 
+      // 3. Crear cronograma de pagos en loan_schedule
       const scheduleRows = []
-      let acumuladoMonto = 0
-      
       for (let i = 1; i <= totalCuotas; i++) {
-        const fechaVenc = new Date(fechaBase.getTime())
+        const fechaVenc = new Date(fechaBase)
         if (freq === 'monthly') fechaVenc.setMonth(fechaVenc.getMonth() + i)
         else fechaVenc.setDate(fechaVenc.getDate() + (diasPeriodo * i))
-
-        const esUltima = i === totalCuotas
-        const cuotaFinalMonto = esUltima ? (totalPagar - acumuladoMonto) : cuotaMonto
-        acumuladoMonto += cuotaFinalMonto
 
         scheduleRows.push({
           loan_id: loanData.id,
           installment_num: i,
           due_date: fechaVenc.toISOString().split('T')[0],
-          principal: esUltima ? (monto - (cuotaPrincipal * (totalCuotas - 1))) : cuotaPrincipal,
-          interest: esUltima ? (totalInteres - (cuotaInteres * (totalCuotas - 1))) : cuotaInteres,
-          total_due: Math.round(cuotaFinalMonto * 100) / 100,
+          principal: cuotaPrincipal,
+          interest: cuotaInteres,
+          total_due: cuotaMonto,
           principal_paid: 0,
           interest_paid: 0,
           penalty_paid: 0,
           total_paid: 0,
-          balance: Math.max(0, Math.round((totalPagar - acumuladoMonto) * 100) / 100),
+          balance: Math.round((totalPagar - (cuotaMonto * i)) * 100) / 100,
           status: 'pending',
           days_overdue: 0,
           penalty_amount: 0
@@ -391,6 +378,7 @@ export default function Loans() {
       const { error: schedError } = await supabase.from('loan_schedule').insert(scheduleRows)
       if (schedError) throw new Error('Error al crear cronograma: ' + schedError.message)
 
+      // 4. Crear caso de cobranza inicial
       await supabase.from('collection_cases').insert({
         company_id: companyId,
         branch_id: branchId,
@@ -406,13 +394,13 @@ export default function Loans() {
       setShowApproveModal(false)
       setApproveItem(null)
       load()
-      alert(`✅ Préstamo aprobado y desembolsado exitosamente.\nCódigo: ${loanData.loan_code}`)
+      alert(`✅ Préstamo aprobado y desembolsado exitosamente.\nCódigo: ${loanData.loan_code}\nCronograma de ${totalCuotas} cuotas generado.`)
     } catch (err) { alert(err.message) }
     setApproveSaving(false)
   }
 
   async function rejectApplication(item) {
-    if (!confirm(`¿Rechazar la solicitud ${item.application_code || ''}?`)) return
+    if (!confirm(`¿Rechazar la solicitud ${item.application_code}?`)) return
     try {
       await supabase.from('loan_applications').update({
         status: 'rejected',
@@ -430,6 +418,7 @@ export default function Loans() {
   ]
   const tipoLabel = { 'weekly': 'Semanal', 'biweekly': 'Quincenal', 'monthly': 'Mensual' }
 
+  // Preview del cronograma en modal de aprobación
   const approveAnalisis = approveForm.approved_amount && approveForm.approved_rate && approveForm.approved_term
     ? calcularEstructura({
         monto: approveForm.approved_amount,
@@ -481,45 +470,39 @@ export default function Loans() {
                 <tr><td colSpan={8}>
                   <Empty icon={CreditCard} title="Sin registros" desc="Registra la primera solicitud de préstamo" />
                 </td></tr>
-              ) : items.map(item => {
-                let displayPlazo = item.term_text || `${item.term_months} meses`;
-                if (!item.term_text && item.ai_analysis?.custom_term_text) {
-                  displayPlazo = item.ai_analysis.custom_term_text;
-                }
-                return (
-                  <tr key={item.id}>
-                    <td className="font-mono text-xs font-semibold text-hpa-700">
-                      {item.application_code || item.loan_code}
-                    </td>
-                    <td>
-                      <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
-                      <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
-                    </td>
-                    <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
-                    <td>{displayPlazo}</td>
-                    <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
-                    <td><StatusBadge status={item.status} /></td>
-                    <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
-                    <td>
-                      <div className="flex gap-1">
-                        {(item.status === 'submitted' || item.status === 'in_review') && (
-                          <>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => openEdit(item)}>
-                              <Edit2 size={13} />
-                            </button>
-                            <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar y Desembolsar" onClick={() => openApprove(item)}>
-                              <CheckSquare size={13} />
-                            </button>
-                            <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar" onClick={() => rejectApplication(item)}>
-                              <XSquare size={13} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+              ) : items.map(item => (
+                <tr key={item.id}>
+                  <td className="font-mono text-xs font-semibold text-hpa-700">
+                    {item.application_code || item.loan_code}
+                  </td>
+                  <td>
+                    <p className="font-medium">{item.clients?.first_name} {item.clients?.last_name}</p>
+                    <p className="text-xs text-hpa-slate-5">{item.clients?.phone_primary}</p>
+                  </td>
+                  <td className="font-numeric">{fmt(item.amount_requested || item.principal, item.currency)}</td>
+                  <td>{item.term_months} meses</td>
+                  <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
+                  <td><StatusBadge status={item.status} /></td>
+                  <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
+                  <td>
+                    <div className="flex gap-1">
+                      {(item.status === 'submitted' || item.status === 'in_review') && (
+                        <>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => openEdit(item)}>
+                            <Edit2 size={13} />
+                          </button>
+                          <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar y Desembolsar" onClick={() => openApprove(item)}>
+                            <CheckSquare size={13} />
+                          </button>
+                          <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar" onClick={() => rejectApplication(item)}>
+                            <XSquare size={13} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -640,7 +623,7 @@ export default function Loans() {
                   <table className="table text-[11px] w-full">
                     <thead><tr><th>#</th><th>Fecha Venc.</th><th>Cuota</th><th>Balance</th><th>Estado</th></tr></thead>
                     <tbody>
-                      {analisis.cuotas.map((c) => (
+                      {analisis.cuotas.map((c, i) => (
                         <tr key={c.num} className={c.pagado ? 'bg-emerald-50/60' : ''}>
                           <td>{c.num}</td>
                           <td className="font-medium text-hpa-700">{c.fechaVenc}</td>
@@ -710,15 +693,29 @@ export default function Loans() {
                 <input className="input" type="date" value={approveForm.disbursement_date||''} onChange={e=>afc('disbursement_date',e.target.value)} />
               </Field>
             </div>
-            <div>
-              <Field label="Condiciones Particulares de Aprobación">
-                <textarea className="input h-16 resize-none" placeholder="Ej: Retener título físico hasta saldar..." value={approveForm.conditions||''} onChange={e=>afc('conditions',e.target.value)} />
-              </Field>
-            </div>
+            <Field label="Condiciones especiales">
+              <textarea className="input h-16 resize-none" value={approveForm.conditions||''} onChange={e=>afc('conditions',e.target.value)} placeholder="Garantías, condiciones adicionales..." />
+            </Field>
             {approveAnalisis.cuotas.length > 0 && (
-              <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200 text-xs">
-                <p className="font-bold text-amber-900 mb-1">Vista previa del Plan de Pagos Generado:</p>
-                <p className="text-amber-800 mb-2">Se registrarán {approveAnalisis.cuotas.length} cuotas fijas de <strong>RD$ {approveAnalisis.montoCuota.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>.</p>
+              <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                <p className="text-xs font-bold text-emerald-800 mb-3">
+                  Cronograma a generar: {approveAnalisis.cuotas.length} cuotas de RD$ {approveAnalisis.montoCuota.toLocaleString('en-US',{minimumFractionDigits:2})}
+                </p>
+                <div className="max-h-40 overflow-y-auto">
+                  <table className="table text-[11px] w-full">
+                    <thead><tr><th>#</th><th>Fecha Venc.</th><th>Cuota</th><th>Balance</th></tr></thead>
+                    <tbody>
+                      {approveAnalisis.cuotas.map(c => (
+                        <tr key={c.num}>
+                          <td>{c.num}</td>
+                          <td className="font-medium text-hpa-700">{c.fechaVenc}</td>
+                          <td className="font-semibold">RD$ {c.monto.toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+                          <td className="text-hpa-slate-5">RD$ {c.saldoRestante.toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
