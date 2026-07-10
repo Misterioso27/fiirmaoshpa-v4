@@ -1,287 +1,364 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, DollarSign, User, RefreshCw } from 'lucide-react'
+import { PhoneCall, AlertTriangle, Search } from 'lucide-react'
 import { supabase, fmt, fmtDate } from '@/lib/supabase'
-import { Field, Spinner } from '@/components/ui'
+import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
+
+const STAGE_COLORS = {
+  preventive: 'badge-blue', early: 'badge-amber',
+  advanced: 'badge-red', recovery: 'badge-red', legal: 'badge-red'
+}
+const STAGE_LABELS = {
+  preventive: 'Preventiva', early: 'Temprana',
+  advanced: 'Avanzada', recovery: 'Recuperación', legal: 'Legal'
+}
 
 export default function Collections() {
   const { user } = useAuthStore()
-  const companyId = user?.company_id || user?.company?.id || user?.raw_user_meta_data?.company_id;
-  const branchId = user?.branch?.id
+  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
 
-  const [loadingSession, setLoadingSession] = useState(false)
-  const [activeSession, setActiveSession] = useState(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searching, setSearching] = useState(false)
-  const [loans, setLoans] = useState([])
-  const [selectedLoan, setSelectedLoan] = useState(null)
-  const [amountToPay, setAmountToPay] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [cases, setCases]           = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [page, setPage]             = useState(1)
+  const [pagination, setPagination] = useState({})
+  const [stage, setStage]           = useState('')
+  const [selected, setSelected]     = useState(null)
+  const [schedule, setSchedule]     = useState([])
+  const [loadingSchedule, setLoadingSchedule] = useState(false)
+  const [showAction, setShowAction] = useState(false)
+  const [actionForm, setActionForm] = useState({})
+  const [saving, setSaving]         = useState(false)
+  const [payAmount, setPayAmount]   = useState('')
+  const [paying, setPaying]         = useState(false)
 
-  // 1. Validar sesión de caja abierta (REEMPLAZAR DESDE AQUÍ)
-  const checkSession = useCallback(async () => {
-    if (!user?.id || !companyId) return
-    setLoadingSession(true)
-    try {
-      const { data } = await supabase
-        .from('cash_sessions')
-        .select('*')
-        .eq('company_id', companyId) // ✅ Filtro RLS añadido
-        .eq('status', 'open')
-        .limit(1)
-      
-      if (data && data.length > 0) {
-        setActiveSession(data[0])
-      } else {
-        setActiveSession(null)
-      }
-    } catch (err) { 
-      console.error('Error en checkSession:', err) 
-    }
-    setLoadingSession(false)
-  }, [user?.id, companyId])
-
-  useEffect(() => { checkSession() }, [checkSession])
-  // (HASTA AQUÍ)
-  // 2. Buscador blindado (Metáfora del Emparedado)
-const handleSearch = async (e) => {
-    if (e) e.preventDefault()
-    
+  const load = useCallback(async () => {
     if (!companyId) return
-
-    setSearching(true)
-    setSelectedLoan(null)
+    setLoading(true)
     try {
-      // 🥪 RELLENO: Con el RLS activo, es OBLIGATORIO filtrar por company_id
-      const { data: rawLoans, error: loanErr } = await supabase
-        .from('loans')
-        .select('*')
-        .eq('company_id', companyId) // ✅ Filtro de seguridad restaurado
-
-      console.log("Préstamos con RLS Activo:", rawLoans);
-      if (loanErr) throw loanErr
-
-      const { data: rawClients, error: clientErr } = await supabase
-        .from('clients')
-        .select('*')
+      const limit = 20
+      const offset = (page - 1) * limit
+      let query = supabase
+        .from('collection_cases')
+        .select(`
+          id, stage, status, days_overdue, amount_overdue, installments_due,
+          next_action_at, created_at,
+          clients(id, first_name, last_name, phone_primary, national_id),
+          loans(id, loan_code, balance_total, balance_principal, principal,
+                payment_amount, next_payment_date, status, days_overdue)
+        `, { count: 'exact' })
         .eq('company_id', companyId)
+        .order('days_overdue', { ascending: false })
+        .range(offset, offset + limit - 1)
 
-      if (clientErr) throw clientErr
+      if (stage) query = query.eq('stage', stage)
 
-      const clientsMap = (rawClients || []).reduce((acc, curr) => {
-        acc[curr.id] = curr
-        return acc
-      }, {})
-
-      const enrichedLoans = (rawLoans || []).map(loan => {
-        const targetClientId = loan.client_id || loan.customer_id
-        const clientData = clientsMap[targetClientId]
-
-        return {
-          ...loan,
-          customerData: clientData || { 
-            first_name: loan.client_name || 'Cliente', 
-            last_name: loan.client_lastname || 'Sin Apellido'
-          }
-        }
-      })
-
-      const term = searchQuery.toLowerCase().trim()
-
-      if (!searchQuery.trim()) {
-        setLoans(enrichedLoans)
-      } else {
-        const matches = enrichedLoans.filter(loan => {
-          const loanCode = (loan.loan_code || loan.id || '').toLowerCase()
-          const firstName = (loan.customerData?.first_name || '').toLowerCase()
-          const lastName = (loan.customerData?.last_name || '').toLowerCase()
-          const fullName = `${firstName} ${lastName}`
-
-          return loanCode.includes(term) || firstName.includes(term) || lastName.includes(term) || fullName.includes(term)
-        })
-        setLoans(matches)
+      const { data, error, count } = await query
+      if (!error) {
+        setCases(data || [])
+        setPagination({ total: count, page, limit, pages: Math.ceil((count || 0) / limit) })
       }
-    } catch (err) {
-      console.error('Error en búsqueda de Cobranzas:', err.message)
-    }
-    setSearching(false)
-  }
+    } catch {}
+    setLoading(false)
+  }, [page, stage, companyId])
 
-  // 🥪 TAPA INFERIOR: Se dispara solo cuando la compañía y la sucursal están listas en memoria
-  useEffect(() => {
-    if (companyId) {
-      handleSearch()
-    }
-  }, [branchId, companyId])
+  useEffect(() => { load() }, [load])
 
-  const handleInputChange = (e) => {
-    const value = e.target.value
-    setSearchQuery(value)
-    if (value.trim() === '') {
-      handleSearch()
-    }
-  }
-
-  const handleProcessPayment = async (e) => {
-    e.preventDefault()
-    const paymentAmount = parseFloat(amountToPay)
-    if (isNaN(paymentAmount) || paymentAmount <= 0) return alert('Ingrese un monto válido')
-
-    setSubmitting(true)
+  async function selectCase(c) {
+    setSelected(c)
+    setPayAmount('')
+    setLoadingSchedule(true)
     try {
-      const currentOutstanding = parseFloat(selectedLoan.outstanding_balance || selectedLoan.amount || 0)
-      const newOutstanding = Math.max(0, currentOutstanding - paymentAmount)
-      const nextStatus = newOutstanding === 0 ? 'paid' : selectedLoan.status
-
-      const { error: updateErr } = await supabase
-        .from('loans')
-        .update({ outstanding_balance: newOutstanding, status: nextStatus })
-        .eq('id', selectedLoan.id)
-
-      if (updateErr) throw updateErr
-
-      if (activeSession) {
-        await supabase.from('cash_movements').insert([{
-          cash_session_id: activeSession.id,
-          type: 'income',
-          amount: paymentAmount,
-          description: `Abono cuota - Cartera: ${selectedLoan.loan_code}`
-        }])
-
-        const newSessionBalance = parseFloat(activeSession.current_balance) + paymentAmount
-        await supabase.from('cash_sessions').update({ current_balance: newSessionBalance }).eq('id', activeSession.id)
-      }
-
-      alert('¡Abono aplicado correctamente!')
-      setAmountToPay('')
-      setSelectedLoan(null)
-      setSearchQuery('')
-      checkSession()
-      handleSearch()
-    } catch (err) {
-      alert('Error al registrar cobro: ' + err.message)
-    }
-    setSubmitting(false)
+      const { data, error } = await supabase
+        .from('loan_schedule')
+        .select('*')
+        .eq('loan_id', c.loans?.id)
+        .order('installment_num')
+      if (!error) setSchedule(data || [])
+    } catch {}
+    setLoadingSchedule(false)
   }
+
+  async function applyPayment() {
+    if (!payAmount || !selected) return
+    setPaying(true)
+    try {
+      const monto = parseFloat(payAmount)
+      const pendientes = schedule.filter(s => s.status === 'pending').sort((a,b) => a.installment_num - b.installment_num)
+      if (!pendientes.length) throw new Error('No hay cuotas pendientes')
+
+      const cuota = pendientes[0]
+      
+      // Marcar cuota como pagada
+      await supabase.from('loan_schedule').update({
+        total_paid: monto,
+        principal_paid: cuota.principal,
+        interest_paid: cuota.interest,
+        status: monto >= cuota.total_due ? 'paid' : 'partial',
+        paid_at: new Date().toISOString()
+      }).eq('id', cuota.id)
+
+      // Actualizar balance del préstamo
+      const nuevaBalance = Math.max(0, (selected.loans?.balance_total || 0) - monto)
+      await supabase.from('loans').update({
+        balance_total: nuevaBalance,
+        balance_principal: Math.max(0, (selected.loans?.balance_principal || 0) - cuota.principal)
+      }).eq('id', selected.loans?.id)
+
+      // Actualizar caso de cobranza
+      const cuotasPagadas = schedule.filter(s => s.status === 'paid').length + 1
+      const cuotasTotal = schedule.length
+      await supabase.from('collection_cases').update({
+        amount_overdue: nuevaBalance,
+        installments_due: Math.max(0, (selected.installments_due || 0) - 1)
+      }).eq('id', selected.id)
+
+      setPayAmount('')
+      await selectCase({ ...selected, loans: { ...selected.loans, balance_total: nuevaBalance } })
+      load()
+      alert(`✅ Pago de RD$ ${monto.toLocaleString('en-US', { minimumFractionDigits: 2 })} aplicado correctamente.\nCuota ${cuota.installment_num}/${cuotasTotal} marcada como pagada.`)
+    } catch (err) { alert(err.message) }
+    setPaying(false)
+  }
+
+  async function saveAction() {
+    if (!actionForm.type || !actionForm.notes) return
+    setSaving(true)
+    try {
+      await supabase.from('collection_actions').insert({
+        case_id: selected.id,
+        company_id: companyId,
+        type: actionForm.type,
+        result: actionForm.result || null,
+        notes: actionForm.notes,
+        next_action: actionForm.next_action || null,
+        next_action_date: actionForm.next_action_date || null,
+        created_by: user.id
+      })
+      if (actionForm.next_action_date) {
+        await supabase.from('collection_cases').update({
+          next_action_at: actionForm.next_action_date
+        }).eq('id', selected.id)
+      }
+      setShowAction(false)
+      setActionForm({})
+    } catch (err) { alert(err.message) }
+    setSaving(false)
+  }
+
+  const cuotasPagadas = schedule.filter(s => s.status === 'paid').length
+  const cuotasPendientes = schedule.filter(s => s.status === 'pending').length
+  const proximaCuota = schedule.find(s => s.status === 'pending')
 
   return (
-    <div className="space-y-5">
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Módulo de Cobranza</h2>
-          <p className="text-xs text-gray-500">Recaudación y aplicación de amortizaciones en tiempo real</p>
+    <div className="h-[calc(100vh-120px)] flex gap-4 animate-fade-in">
+      {/* Panel izquierdo — lista de casos */}
+      <div className="w-80 flex-shrink-0 flex flex-col">
+        <div className="mb-3">
+          <h2 className="text-lg font-bold text-hpa-slate-9">Cobranza</h2>
+          <p className="text-xs text-hpa-slate-5">{pagination.total || 0} casos activos</p>
         </div>
-        <div>
-          {activeSession ? (
-            <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full border border-emerald-300">
-              ✓ Caja Abierta (Sesión Activa)
-            </span>
-          ) : (
-            <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full border border-amber-300">
-              ⚠ Cobro de Contingencia (Sin Caja Abierta)
-            </span>
-          )}
+
+        <div className="mb-3">
+          <select className="select w-full" value={stage} onChange={e => { setStage(e.target.value); setPage(1) }}>
+            <option value="">Todas las etapas</option>
+            {Object.entries(STAGE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-2">
+          {loading ? (
+            <div className="flex justify-center py-8"><Spinner size={20} /></div>
+          ) : cases.length === 0 ? (
+            <Empty icon={PhoneCall} title="Sin casos" desc="No hay casos de cobranza activos" />
+          ) : cases.map(c => (
+            <div key={c.id}
+              className={`card-sm cursor-pointer transition-all border-2 ${selected?.id === c.id ? 'border-hpa-700 bg-hpa-700/5' : 'border-transparent hover:border-hpa-slate-3'}`}
+              onClick={() => selectCase(c)}>
+              <div className="flex items-start justify-between mb-1">
+                <p className="font-semibold text-sm text-hpa-slate-9">{c.clients?.first_name} {c.clients?.last_name}</p>
+                <span className={`badge ${STAGE_COLORS[c.stage] || 'badge-gray'}`}>{STAGE_LABELS[c.stage] || c.stage}</span>
+              </div>
+              <p className="text-xs text-hpa-slate-5 font-mono">{c.loans?.loan_code}</p>
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-sm font-bold font-numeric text-hpa-slate-9">
+                  Balance: {fmt(c.loans?.balance_total || c.amount_overdue || 0)}
+                </p>
+                {c.days_overdue > 0 && (
+                  <span className="text-xs font-bold text-red-500">{c.days_overdue}d mora</span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-            <form onSubmit={handleSearch} className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
-                <input
-                  type="text"
-                  className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Buscar código o nombre cliente..."
-                  value={searchQuery}
-                  onChange={handleInputChange}
-                />
-              </div>
-              <button 
-                type="submit" 
-                className="px-4 text-xs font-bold bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50 min-w-[76px] flex items-center justify-center"
-                disabled={searching}
-              >
-                {searching ? <RefreshCw size={12} className="animate-spin" /> : 'Filtrar'}
-              </button>
-            </form>
+      {/* Panel derecho — detalle */}
+      <div className="flex-1 overflow-y-auto">
+        {!selected ? (
+          <div className="h-full flex items-center justify-center">
+            <Empty icon={PhoneCall} title="Selecciona un caso" desc="Elige un cliente de la lista para ver el detalle y aplicar cobros" />
           </div>
-
-          <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm min-h-[250px]">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Cuentas Encontradas</p>
-            {loans.length === 0 ? (
-              <div className="text-center py-12 text-xs text-gray-400">
-                No se encontraron cuentas activas con el criterio ingresado.
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {loans.map(loan => (
-                  <div
-                    key={loan.id}
-                    onClick={() => setSelectedLoan(loan)}
-                    className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${selectedLoan?.id === loan.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
-                  >
-                    <p className="text-xs font-bold font-mono">{loan.loan_code}</p>
-                    <p className="text-sm font-medium">{loan.customerData?.first_name} {loan.customerData?.last_name}</p>
-                    <p className={`text-xs mt-1 font-bold font-mono ${selectedLoan?.id === loan.id ? 'text-indigo-200' : 'text-emerald-600'}`}>
-                      Balance: {fmt(loan.outstanding_balance || loan.amount)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="lg:col-span-7">
-          {!selectedLoan ? (
-            <div className="bg-white border border-dashed border-gray-200 rounded-xl h-full flex flex-col items-center justify-center text-center p-8 min-h-[360px]">
-              <div className="p-4 bg-gray-50 rounded-full text-gray-400 mb-3"><User size={32} /></div>
-              <h4 className="text-sm font-bold text-gray-700">Ningún préstamo seleccionado</h4>
-              <p className="text-xs text-gray-400 max-w-xs mt-1">Seleccione una cuenta en el panel izquierdo para procesar su cobro.</p>
-            </div>
-          ) : (
-            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-6">
-              <div className="border-b border-gray-100 pb-4 flex justify-between items-start">
+        ) : (
+          <div className="space-y-4">
+            {/* Header del caso */}
+            <div className="card">
+              <div className="flex items-start justify-between mb-4">
                 <div>
-                  <span className="text-[10px] font-bold bg-gray-100 text-gray-800 px-2 py-0.5 rounded uppercase font-mono">{selectedLoan.loan_code}</span>
-                  <h3 className="text-base font-bold text-gray-900 mt-1">{selectedLoan.customerData?.first_name} {selectedLoan.customerData?.last_name}</h3>
+                  <h3 className="text-lg font-bold text-hpa-slate-9">{selected.clients?.first_name} {selected.clients?.last_name}</h3>
+                  <p className="text-xs text-hpa-slate-5">{selected.clients?.phone_primary} · {selected.clients?.national_id}</p>
+                  <p className="text-xs font-mono text-hpa-700 mt-0.5">{selected.loans?.loan_code}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[11px] text-gray-400 uppercase">Balance Pendiente</p>
-                  <p className="text-xl font-black text-emerald-600 font-mono">{fmt(selectedLoan.outstanding_balance || selectedLoan.amount)}</p>
+                  <p className="text-2xl font-bold font-numeric text-hpa-slate-9">{fmt(selected.loans?.balance_total || 0)}</p>
+                  <p className="text-xs text-hpa-slate-5">Balance pendiente</p>
+                  {selected.days_overdue > 0 && (
+                    <span className="badge badge-red mt-1">{selected.days_overdue} días en mora</span>
+                  )}
                 </div>
               </div>
 
-              <form onSubmit={handleProcessPayment} className="space-y-4">
-                <Field label="Monto a Recaudar / Abonar" required>
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-2.5 text-gray-400" size={16} />
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="w-full pl-9 pr-4 py-2 text-base font-bold bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-emerald-700"
-                      placeholder="0.00"
-                      value={amountToPay}
-                      onChange={e => setAmountToPay(e.target.value)}
-                      disabled={submitting}
-                    />
-                  </div>
-                </Field>
-
-                <button
-                  type="submit"
-                  className="w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-                  disabled={submitting}
-                >
-                  {submitting ? <Spinner size={14} /> : 'Aplicar Amortización'}
-                </button>
-              </form>
+              {/* Resumen cuotas */}
+              <div className="grid grid-cols-4 gap-3 p-3 bg-hpa-slate-1 rounded-xl">
+                <div className="text-center">
+                  <p className="text-xs text-hpa-slate-5">Total Cuotas</p>
+                  <p className="font-bold text-hpa-slate-9">{schedule.length}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-hpa-slate-5">Pagadas</p>
+                  <p className="font-bold text-emerald-600">{cuotasPagadas}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-hpa-slate-5">Pendientes</p>
+                  <p className="font-bold text-amber-600">{cuotasPendientes}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-hpa-slate-5">Próx. Venc.</p>
+                  <p className="font-bold text-hpa-700 text-xs">{proximaCuota ? fmtDate(proximaCuota.due_date) : '—'}</p>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+
+            {/* Aplicar cobro */}
+            <div className="card">
+              <h4 className="text-sm font-semibold text-hpa-slate-9 mb-3">Aplicar Cobro</h4>
+              {proximaCuota ? (
+                <div className="space-y-3">
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-xs font-bold text-amber-800">
+                      Próxima cuota #{proximaCuota.installment_num} — Vence: {fmtDate(proximaCuota.due_date)}
+                    </p>
+                    <p className="text-lg font-bold font-numeric text-amber-900 mt-1">
+                      {fmt(proximaCuota.total_due)}
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
+                    <Field label="Monto a cobrar (RD$)" className="flex-1">
+                      <input className="input" type="number" placeholder={proximaCuota.total_due}
+                        value={payAmount} onChange={e => setPayAmount(e.target.value)} />
+                    </Field>
+                    <div className="flex items-end">
+                      <button className="btn btn-primary" onClick={applyPayment} disabled={paying || !payAmount}>
+                        {paying ? <Spinner size={14} /> : '💰 Cobrar'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="btn btn-ghost btn-sm" onClick={() => setPayAmount(proximaCuota.total_due.toString())}>
+                      Monto exacto
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => { setShowAction(true); setActionForm({}) }}>
+                      <PhoneCall size={13} /> Registrar acción
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-center">
+                  <p className="text-sm font-bold text-emerald-800">✅ Préstamo completamente pagado</p>
+                </div>
+              )}
+            </div>
+
+            {/* Cronograma de cuotas */}
+            <div className="card p-0 overflow-hidden">
+              <div className="px-4 py-3 border-b border-hpa-slate-2">
+                <h4 className="text-sm font-semibold text-hpa-slate-9">Cronograma de Pagos</h4>
+              </div>
+              {loadingSchedule ? (
+                <div className="py-8 text-center"><Spinner size={20} className="mx-auto" /></div>
+              ) : schedule.length === 0 ? (
+                <Empty icon={AlertTriangle} title="Sin cronograma" desc="No hay cuotas generadas para este préstamo" />
+              ) : (
+                <div className="table-wrapper">
+                  <table className="table">
+                    <thead>
+                      <tr><th>#</th><th>Fecha Venc.</th><th>Cuota</th><th>Capital</th><th>Interés</th><th>Pagado</th><th>Balance</th><th>Estado</th></tr>
+                    </thead>
+                    <tbody>
+                      {schedule.map(s => (
+                        <tr key={s.id} className={s.status === 'paid' ? 'bg-emerald-50/50' : ''}>
+                          <td className="font-semibold">{s.installment_num}</td>
+                          <td className={`text-xs font-medium ${new Date(s.due_date) < new Date() && s.status === 'pending' ? 'text-red-500' : 'text-hpa-700'}`}>
+                            {fmtDate(s.due_date)}
+                          </td>
+                          <td className="font-numeric font-semibold">{fmt(s.total_due)}</td>
+                          <td className="font-numeric text-xs">{fmt(s.principal)}</td>
+                          <td className="font-numeric text-xs text-amber-600">{fmt(s.interest)}</td>
+                          <td className="font-numeric text-xs text-emerald-600">{fmt(s.total_paid)}</td>
+                          <td className="font-numeric">{fmt(s.balance)}</td>
+                          <td>
+                            <span className={`badge ${s.status === 'paid' ? 'badge-green' : new Date(s.due_date) < new Date() ? 'badge-red' : 'badge-amber'}`}>
+                              {s.status === 'paid' ? 'PAGADO' : new Date(s.due_date) < new Date() ? 'VENCIDO' : 'PENDIENTE'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Modal acción de cobranza */}
+      <Modal open={showAction} onClose={() => setShowAction(false)} title="Registrar Acción de Cobranza"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setShowAction(false)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={saveAction} disabled={saving}>
+              {saving ? <Spinner size={14} /> : 'Guardar Acción'}
+            </button>
+          </>
+        }>
+        <div className="space-y-4">
+          <div className="form-row">
+            <Field label="Tipo de acción">
+              <select className="select" value={actionForm.type||''} onChange={e=>setActionForm(f=>({...f,type:e.target.value}))}>
+                <option value="">Seleccionar...</option>
+                {['call','visit','message','email','notice','agreement','other'].map(t=><option key={t}>{t}</option>)}
+              </select>
+            </Field>
+            <Field label="Resultado">
+              <select className="select" value={actionForm.result||''} onChange={e=>setActionForm(f=>({...f,result:e.target.value}))}>
+                <option value="">Seleccionar...</option>
+                {['contact','no_contact','promise','paid','refused','rescheduled','other'].map(r=><option key={r}>{r}</option>)}
+              </select>
+            </Field>
+          </div>
+          <Field label="Notas" required>
+            <textarea className="input h-20 resize-none" value={actionForm.notes||''} onChange={e=>setActionForm(f=>({...f,notes:e.target.value}))} />
+          </Field>
+          <div className="form-row">
+            <Field label="Próxima acción">
+              <input className="input" value={actionForm.next_action||''} onChange={e=>setActionForm(f=>({...f,next_action:e.target.value}))} />
+            </Field>
+            <Field label="Fecha próx. acción">
+              <input className="input" type="date" value={actionForm.next_action_date||''} onChange={e=>setActionForm(f=>({...f,next_action_date:e.target.value}))} />
+            </Field>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
