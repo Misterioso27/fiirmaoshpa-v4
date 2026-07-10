@@ -486,20 +486,25 @@ export default function Loans() {
                   <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
                   <td>
                     <div className="flex gap-1">
-                      {(item.status === 'submitted' || item.status === 'in_review') && (
-                        <>
-                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => openEdit(item)}>
-                            <Edit2 size={13} />
-                          </button>
-                          <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar y Desembolsar" onClick={() => openApprove(item)}>
-                            <CheckSquare size={13} />
-                          </button>
-                          <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar" onClick={() => rejectApplication(item)}>
-                            <XSquare size={13} />
-                          </button>
-                        </>
-                      )}
-                    </div>
+  {(item.status === 'submitted' || item.status === 'in_review') && (
+    <>
+      <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => openEdit(item)}>
+        <Edit2 size={13} />
+      </button>
+      <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar y Desembolsar" onClick={() => openApprove(item)}>
+        <CheckSquare size={13} />
+      </button>
+      <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar" onClick={() => rejectApplication(item)}>
+        <XSquare size={13} />
+      </button>
+    </>
+  )}
+  {item.status === 'approved' && (
+    <button className="btn btn-ghost btn-sm btn-icon text-hpa-700" title="Ver detalle" onClick={() => openEdit(item)}>
+      <Edit2 size={13} />
+    </button>
+  )}
+</div>
                   </td>
                 </tr>
               ))}
