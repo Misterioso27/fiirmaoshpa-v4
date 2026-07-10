@@ -239,7 +239,7 @@ export default function Loans() {
             monthly_income: parseFloat(form.monthly_income),
             type: form.type,
           })
-          .eq('id', selected.id).eq('status', 'submitted')
+          .in('status', ['submitted', 'in_review', 'approved'])
       } else {
         const estadoInicial = analisis.warning ? 'in_review' : 'submitted'
         await db.createLoanApplication({
