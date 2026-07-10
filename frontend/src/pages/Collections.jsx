@@ -82,7 +82,7 @@ export default function Collections() {
     if (!payAmount || !selected) return
     setPaying(true)
     try {
-      const monto = parseFloat(payAmount)
+      const monto = parseFloat(String(payAmount).replace(/,/g, ''))
       const pendientes = schedule.filter(s => s.status === 'pending').sort((a,b) => a.installment_num - b.installment_num)
       if (!pendientes.length) throw new Error('No hay cuotas pendientes')
 
