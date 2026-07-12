@@ -750,10 +750,8 @@ export default function Loans() {
                   )}
                 </select>
               </Field>
-              <Field label="Monto Solicitado" required>
-                <input className="input" type="number" placeholder="0.00"
-                  value={form.amount_requested || ''} onChange={e => fc('amount_requested', e.target.value)}
-                  readOnly={!!selected} />
+              <input className="input" type="number" placeholder="0.00"
+  value={form.amount_requested || ''} onChange={e => fc('amount_requested', e.target.value)} />
               </Field>
               <Field label="Tasa Mensual (%)" required>
                 <input className="input" type="number" step="0.5" placeholder="10"
