@@ -156,7 +156,7 @@ export default function Loans() {
       meses:        form.term_months,
       cuotasManual: form.cuotas_manual,
       frecuencia:   form.frequency || 'monthly',
-      ingresoNeto:  form.monthly_income,
+     ingresoNeto:  form.monthly_income ? String(form.monthly_income) : '',
       fechaInicio:  new Date().toISOString(),
       currency:     form.currency || 'DOP',
     }))
