@@ -63,16 +63,22 @@ function calcularEstructura({ monto, tasaMensual, meses, cuotasManual, frecuenci
 
   // Regla del 30%
   let errorMsg = '', warningMsg = ''
-  if (ingresoNeto && parseFloat(ingresoNeto) > 0) {
-    const ingreso        = parseFloat(ingresoNeto)
+  const ingresoNum = parseFloat(String(ingresoNeto || '0').replace(/,/g, ''))
+  if (ingresoNum > 0 && montoCuota > 0) {
+    // Convertir cuota a equivalente mensual según frecuencia
     const cuotaMensualEq = frecuencia === 'weekly'   ? montoCuota * 4.333
                          : frecuencia === 'biweekly' ? montoCuota * 2
                          : montoCuota
-    const limite30 = ingreso * 0.30
-    const exceso   = cuotaMensualEq - limite30
+
+    const limite30 = ingresoNum * 0.30
+    const exceso   = parseFloat((cuotaMensualEq - limite30).toFixed(2))
+
     if (cuotaMensualEq > limite30) {
-      if (exceso <= 1000) warningMsg = `⚠️ Requiere Autorización: Excede el 30% por ${fmtCurrency(exceso, currency)}. Se guardará en revisión.`
-      else                errorMsg   = `❌ Bloqueado: Supera capacidad de pago por ${fmtCurrency(exceso, currency)} (más de ${fmtCurrency(1000, currency)} sobre el límite).`
+      if (exceso <= 1000) {
+        warningMsg = `⚠️ Requiere Autorización Administrativa: La cuota mensual equivalente es ${fmtCurrency(cuotaMensualEq, currency)}, excede el límite del 30% (${fmtCurrency(limite30, currency)}) por ${fmtCurrency(exceso, currency)}. Se guardará en revisión.`
+      } else {
+        errorMsg = `❌ Solicitud Bloqueada: La cuota mensual equivalente es ${fmtCurrency(cuotaMensualEq, currency)}, supera la capacidad de pago (${fmtCurrency(limite30, currency)}) por ${fmtCurrency(exceso, currency)} — más de ${fmtCurrency(1000, currency)} sobre el límite permitido.`
+      }
     }
   }
 
