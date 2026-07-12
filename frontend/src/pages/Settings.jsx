@@ -357,3 +357,255 @@ export default function Settings() {
                           <td className="text-hpa-slate-5">{p.term_min_months}–{p.term_max_months}m</td>
                           <td>
                             <div className="flex gap-1 flex-wrap">
+{(p.currencies || ['DOP']).map(c => (
+                                <span key={c} className="badge badge-gray text-[9px]">{c}</span>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <button
+                              className={`badge cursor-pointer ${p.is_active ? 'badge-green' : 'badge-gray'}`}
+                              onClick={() => toggleProduct(p)}
+                            >
+                              {p.is_active ? 'ACTIVO' : 'INACTIVO'}
+                            </button>
+                          </td>
+                          <td>
+                            <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openProductModal(p)}>
+                              <Edit2 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB CAJAS ─────────────────────────────────────── */}
+          {tab === 'cash' && (
+            <div className="space-y-4">
+              <p className="form-section-title">Cajas Registradas</p>
+              {registers.length === 0 ? (
+                <Empty icon={Building2} title="Sin cajas" desc="No hay cajas registradas para esta empresa" />
+              ) : (
+                <div className="table-wrapper">
+                  <table className="table text-xs">
+                    <thead>
+                      <tr><th>Nombre</th><th>Código</th><th>Sucursal</th><th>Moneda</th><th>Saldo Actual</th><th>Estado</th></tr>
+                    </thead>
+                    <tbody>
+                      {registers.map(r => (
+                        <tr key={r.id}>
+                          <td className="font-semibold">{r.name}</td>
+                          <td className="font-mono text-hpa-700">{r.code}</td>
+                          <td className="text-hpa-slate-5">{r.branches?.name || '—'}</td>
+                          <td><span className="badge badge-blue">{r.currency}</span></td>
+                          <td className="font-numeric font-semibold">
+                            {parseFloat(r.current_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td>
+                            <span className={`badge ${r.status === 'open' ? 'badge-green' : 'badge-gray'}`}>
+                              {r.status === 'open' ? 'ABIERTA' : 'CERRADA'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <p className="form-section-title mt-6">Sucursales</p>
+              {branches.length === 0 ? (
+                <Empty icon={Building2} title="Sin sucursales" desc="No hay sucursales registradas" />
+              ) : (
+                <div className="table-wrapper">
+                  <table className="table text-xs">
+                    <thead>
+                      <tr><th>Nombre</th><th>Código</th><th>Ciudad</th><th>Estado</th></tr>
+                    </thead>
+                    <tbody>
+                      {branches.map(b => (
+                        <tr key={b.id}>
+                          <td className="font-semibold">{b.name}</td>
+                          <td className="font-mono text-hpa-700">{b.code}</td>
+                          <td className="text-hpa-slate-5">{b.city || '—'}</td>
+                          <td>
+                            <span className={`badge ${b.is_active ? 'badge-green' : 'badge-gray'}`}>
+                              {b.is_active ? 'ACTIVA' : 'INACTIVA'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB SISTEMA ───────────────────────────────────── */}
+          {tab === 'system' && (
+            <div className="max-w-lg space-y-4">
+              <p className="form-section-title">Parámetros del Sistema</p>
+
+              {Object.entries(CONFIG_LABELS).map(([key, meta]) => (
+                <Field key={key} label={meta.label}>
+                  {meta.type === 'select' ? (
+                    <select className="select"
+                      value={config[key] || ''}
+                      onChange={e => setConfigVal(key, e.target.value)}>
+                      {meta.options.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <input
+                      className="input"
+                      type={meta.type === 'number' ? 'number' : 'text'}
+                      step={meta.type === 'number' ? '0.01' : undefined}
+                      value={config[key] ?? ''}
+                      onChange={e => setConfigVal(key, meta.type === 'number' ? parseFloat(e.target.value) : e.target.value)}
+                      placeholder={`Valor de ${meta.label}`}
+                    />
+                  )}
+                </Field>
+              ))}
+
+              {Object.keys(configDirty).length > 0 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-semibold">
+                  ⚠️ {Object.keys(configDirty).length} parámetro{Object.keys(configDirty).length !== 1 ? 's' : ''} sin guardar
+                </div>
+              )}
+
+              <button className="btn btn-primary" onClick={saveConfig} disabled={saving || !Object.keys(configDirty).length}>
+                {saving ? <Spinner size={14} /> : <><Save size={14} /> Guardar Parámetros</>}
+              </button>
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* ── MODAL PRODUCTO FINANCIERO ─────────────────────────── */}
+      <Modal
+        open={showProductModal}
+        onClose={() => setShowProductModal(false)}
+        title={editingProduct ? 'Editar Producto' : 'Nuevo Producto Financiero'}
+        size="lg"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setShowProductModal(false)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={saveProduct} disabled={savingProduct}>
+              {savingProduct ? <Spinner size={14} /> : <><Save size={14} /> {editingProduct ? 'Actualizar' : 'Crear'} Producto</>}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Nombre" required>
+              <input className="input" placeholder="Ej: Préstamo Personal HPA"
+                value={productForm.name || ''} onChange={e => pfv('name', e.target.value)} />
+            </Field>
+            <Field label="Código" required>
+              <input className="input" placeholder="Ej: LOAN-PERSONAL"
+                value={productForm.code || ''} onChange={e => pfv('code', e.target.value.toUpperCase())} />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Categoría" required>
+              <select className="select" value={productForm.category || 'loan'} onChange={e => pfv('category', e.target.value)}>
+                <option value="loan">💳 Préstamo</option>
+                <option value="investment">📈 Inversión</option>
+                <option value="savings">🏦 Ahorro</option>
+              </select>
+            </Field>
+            <Field label="Tasa Mensual (%)" required>
+              <input className="input" type="number" step="0.1"
+                value={productForm.rate_monthly || ''} onChange={e => pfv('rate_monthly', e.target.value)} />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Plazo Mínimo (meses)">
+              <input className="input" type="number"
+                value={productForm.term_min_months || ''} onChange={e => pfv('term_min_months', e.target.value)} />
+            </Field>
+            <Field label="Plazo Máximo (meses)">
+              <input className="input" type="number"
+                value={productForm.term_max_months || ''} onChange={e => pfv('term_max_months', e.target.value)} />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Monto Mínimo">
+              <input className="input" type="number"
+                value={productForm.amount_min || ''} onChange={e => pfv('amount_min', e.target.value)} />
+            </Field>
+            <Field label="Monto Máximo (vacío = sin límite)">
+              <input className="input" type="number"
+                value={productForm.amount_max || ''} onChange={e => pfv('amount_max', e.target.value)} />
+            </Field>
+          </div>
+
+          <Field label="Monedas permitidas">
+            <div className="flex gap-2 flex-wrap">
+              {['DOP','BRL','USD','EUR','GBP'].map(c => {
+                const selected = (productForm.currencies || []).includes(c)
+                return (
+                  <button key={c} type="button"
+                    className={`px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all ${selected ? 'border-hpa-700 bg-hpa-700/10 text-hpa-700' : 'border-hpa-slate-2 text-hpa-slate-5'}`}
+                    onClick={() => {
+                      const curr = productForm.currencies || []
+                      pfv('currencies', selected ? curr.filter(x => x !== c) : [...curr, c])
+                    }}>
+                    {c}
+                  </button>
+                )
+              })}
+            </div>
+          </Field>
+
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Comisión Apertura (%)">
+              <input className="input" type="number" step="0.1"
+                value={productForm.origination_fee || 0} onChange={e => pfv('origination_fee', e.target.value)} />
+            </Field>
+            <Field label="Mora Diaria (%)">
+              <input className="input" type="number" step="0.01"
+                value={productForm.late_fee_daily || 0} onChange={e => pfv('late_fee_daily', e.target.value)} />
+            </Field>
+            <Field label="Días de Gracia">
+              <input className="input" type="number"
+                value={productForm.grace_days || 3} onChange={e => pfv('grace_days', e.target.value)} />
+            </Field>
+          </div>
+
+          <Field label="Descripción">
+            <textarea className="input h-16 resize-none"
+              placeholder="Descripción del producto..."
+              value={productForm.description || ''} onChange={e => pfv('description', e.target.value)} />
+          </Field>
+
+          <div className="flex gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="rounded"
+                checked={productForm.requires_guarantee || false}
+                onChange={e => pfv('requires_guarantee', e.target.checked)} />
+              <span className="text-sm text-hpa-slate-7">Requiere garantía</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="rounded"
+                checked={productForm.is_active !== false}
+                onChange={e => pfv('is_active', e.target.checked)} />
+              <span className="text-sm text-hpa-slate-7">Producto activo</span>
+            </label>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  )
+}
