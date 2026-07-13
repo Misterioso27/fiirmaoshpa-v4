@@ -756,10 +756,9 @@ export default function Loans() {
                   )}
                 </select>
               </Field>
-              <input className="input" type="number" placeholder="0.00"
+              <Field label="Monto Solicitado" required>
   value={form.amount_requested || ''} onChange={e => fc('amount_requested', e.target.value)} />
-              </Field>
-              <Field label="Tasa Mensual (%)" required>
+                <Field label="Tasa Mensual (%)" required>
                 <input className="input" type="number" step="0.5" placeholder="10"
                   value={form.rate_monthly || ''} onChange={e => fc('rate_monthly', e.target.value)} />
               </Field>
@@ -783,7 +782,7 @@ export default function Loans() {
                   onChange={e => fc('cuotas_manual', e.target.value)} />
               </Field>
               <Field label="Ingreso Mensual Neto" required>
-                <input className="input" type="number" placeholder="0.00"
+                <Field label="Monto Solicitado" required>
                   value={form.monthly_income || ''} onChange={e => fc('monthly_income', e.target.value)} />
               </Field>
             </div>
