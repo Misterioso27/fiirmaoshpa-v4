@@ -5,13 +5,12 @@ import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner, Tabs } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
-// ── MONEDAS SOPORTADAS ─────────────────────────────────────────
 const CURRENCIES = {
   DOP: { symbol: 'RD$', label: 'Peso Dominicano', flag: '🇩🇴' },
   BRL: { symbol: 'R$',  label: 'Real Brasileño',  flag: '🇧🇷' },
   USD: { symbol: '$',   label: 'Dólar Americano', flag: '🇺🇸' },
-  EUR: { symbol: '€',   label: 'Euro',             flag: '🇪🇺' },
-  GBP: { symbol: '£',   label: 'Libra Esterlina',  flag: '🇬🇧' },
+  EUR: { symbol: '€',   label: 'Euro',            flag: '🇪🇺' },
+  GBP: { symbol: '£',   label: 'Libra Esterlina', flag: '🇬🇧' },
 }
 
 function fmtCurrency(amount, currency = 'DOP') {
@@ -19,128 +18,75 @@ function fmtCurrency(amount, currency = 'DOP') {
   return `${c.symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-// ── CALCULADORA CORREGIDA ──────────────────────────────────────
-// Fórmula HPA: Interés = Capital × (Tasa% / 100) × 3 — SIEMPRE × 3
-// Total = Capital + Interés
-// Cuota = Total ÷ NúmeroDeCuotas
 function calcularEstructura({ monto, tasaMensual, meses, cuotasManual, frecuencia, ingresoNeto, fechaInicio, currency = 'DOP' }) {
   if (!monto || !tasaMensual) return { cuotas: [], error: '', warning: '', montoCuota: 0, totalCuotas: 0, totalInteres: 0, totalPagar: 0 }
-
-  const p    = parseFloat(monto)
-  const rm   = parseFloat(tasaMensual) / 100
+  const p = parseFloat(monto)
+  const rm = parseFloat(tasaMensual) / 100
   const mesesNum = parseFloat(meses) || 3
-
-  // Cuotas sugeridas por frecuencia y plazo
-  let cuotasSugeridas = 0
-  let diasPorPeriodo  = 30
-  let etiqueta        = 'Cuota'
-
-  if (frecuencia === 'weekly') {
-    cuotasSugeridas = mesesNum === 2.5 ? 10 : 12
-    diasPorPeriodo  = 7
-    etiqueta        = 'Semana'
-  } else if (frecuencia === 'biweekly') {
-    cuotasSugeridas = mesesNum === 2.5 ? 5 : 6
-    diasPorPeriodo  = 15
-    etiqueta        = 'Quincena'
-  } else {
-    cuotasSugeridas = Math.round(mesesNum)
-    diasPorPeriodo  = 30
-    etiqueta        = 'Mes'
-  }
-
-  // Si el usuario ingresó cuotas manualmente, usar ese valor
-  const totalCuotas = cuotasManual && parseInt(cuotasManual) > 0
-    ? parseInt(cuotasManual)
-    : cuotasSugeridas
-
+  let cuotasSugeridas = 0, diasPorPeriodo = 30, etiqueta = 'Cuota'
+  if (frecuencia === 'weekly')        { cuotasSugeridas = mesesNum === 2.5 ? 10 : 12; diasPorPeriodo = 7;  etiqueta = 'Semana'   }
+  else if (frecuencia === 'biweekly') { cuotasSugeridas = mesesNum === 2.5 ? 5  : 6;  diasPorPeriodo = 15; etiqueta = 'Quincena' }
+  else                                { cuotasSugeridas = Math.round(mesesNum);        diasPorPeriodo = 30; etiqueta = 'Mes'      }
+  const totalCuotas = cuotasManual && parseInt(cuotasManual) > 0 ? parseInt(cuotasManual) : cuotasSugeridas
   if (totalCuotas <= 0) return { cuotas: [], error: 'Número de cuotas inválido', warning: '', montoCuota: 0, totalCuotas: 0, totalInteres: 0, totalPagar: 0 }
-
-  // FÓRMULA CORREGIDA HPA — siempre × 3
   const totalInteres = Math.round(p * rm * 3 * 100) / 100
   const totalPagar   = Math.round((p + totalInteres) * 100) / 100
   const montoCuota   = Math.round((totalPagar / totalCuotas) * 100) / 100
-
-  // Regla del 30%
   let errorMsg = '', warningMsg = ''
   const ingresoNum = parseFloat(String(ingresoNeto || '0').replace(/,/g, ''))
   if (ingresoNum > 0 && montoCuota > 0) {
-    // Convertir cuota a equivalente mensual según frecuencia
-    const cuotaMensualEq = frecuencia === 'weekly'   ? montoCuota * 4.333
-                         : frecuencia === 'biweekly' ? montoCuota * 2
-                         : montoCuota
-
+    const cuotaMensualEq = frecuencia === 'weekly' ? montoCuota * 4.333 : frecuencia === 'biweekly' ? montoCuota * 2 : montoCuota
     const limite30 = ingresoNum * 0.30
     const exceso   = parseFloat((cuotaMensualEq - limite30).toFixed(2))
-
     if (cuotaMensualEq > limite30) {
-      if (exceso <= 1000) {
-        warningMsg = `⚠️ Requiere Autorización Administrativa: La cuota mensual equivalente es ${fmtCurrency(cuotaMensualEq, currency)}, excede el límite del 30% (${fmtCurrency(limite30, currency)}) por ${fmtCurrency(exceso, currency)}. Se guardará en revisión.`
-      } else {
-        errorMsg = `❌ Solicitud Bloqueada: La cuota mensual equivalente es ${fmtCurrency(cuotaMensualEq, currency)}, supera la capacidad de pago (${fmtCurrency(limite30, currency)}) por ${fmtCurrency(exceso, currency)} — más de ${fmtCurrency(1000, currency)} sobre el límite permitido.`
-      }
+      if (exceso <= 1000) warningMsg = `⚠️ Requiere Autorización: La cuota mensual equivalente es ${fmtCurrency(cuotaMensualEq, currency)}, excede el límite del 30% (${fmtCurrency(limite30, currency)}) por ${fmtCurrency(exceso, currency)}.`
+      else                errorMsg   = `❌ Bloqueado: La cuota mensual equivalente es ${fmtCurrency(cuotaMensualEq, currency)}, supera la capacidad de pago por ${fmtCurrency(exceso, currency)}.`
     }
   }
-
-  // Generar cronograma
   const base    = fechaInicio ? new Date(fechaInicio) : new Date()
   const listado = []
   let   saldo   = totalPagar
-
   for (let i = 1; i <= totalCuotas; i++) {
     const fechaVenc = new Date(base)
     if (frecuencia === 'monthly') fechaVenc.setMonth(fechaVenc.getMonth() + i)
     else fechaVenc.setDate(fechaVenc.getDate() + diasPorPeriodo * i)
-
     saldo = i === totalCuotas ? 0 : Math.max(0, Math.round((saldo - montoCuota) * 100) / 100)
-
     listado.push({
-      num:           i,
-      label:         `${etiqueta} ${i}`,
-      fechaVenc:     fechaVenc.toLocaleDateString('es-DO', { day: '2-digit', month: 'short', year: 'numeric' }),
-      fechaVencISO:  fechaVenc.toISOString().split('T')[0],
-      monto:         montoCuota,
+      num: i, label: `${etiqueta} ${i}`,
+      fechaVenc:    fechaVenc.toLocaleDateString('es-DO', { day: '2-digit', month: 'short', year: 'numeric' }),
+      fechaVencISO: fechaVenc.toISOString().split('T')[0],
+      monto: montoCuota,
       principal:     Math.round((p / totalCuotas) * 100) / 100,
       interes:       Math.round((totalInteres / totalCuotas) * 100) / 100,
       saldoRestante: saldo,
     })
   }
-
   return { cuotas: listado, error: errorMsg, warning: warningMsg, montoCuota, totalCuotas, totalInteres, totalPagar }
 }
 
-// ── COMPONENTE PRINCIPAL ───────────────────────────────────────
 export default function Loans() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   const branchId  = user?.branch?.id  || 'b0000000-0000-4000-8000-000000000001'
 
-  const [tab, setTab]                         = useState('applications')
-  const [items, setItems]                     = useState([])
-  const [loading, setLoading]                 = useState(true)
-  const [page, setPage]                       = useState(1)
-  const [pagination, setPagination]           = useState({})
-  const [status, setStatus]                   = useState('')
-
-  // Modales
-  const [showModal, setShowModal]             = useState(false)
+  const [tab, setTab]                           = useState('applications')
+  const [items, setItems]                       = useState([])
+  const [loading, setLoading]                   = useState(true)
+  const [page, setPage]                         = useState(1)
+  const [pagination, setPagination]             = useState({})
+  const [status, setStatus]                     = useState('')
+  const [showModal, setShowModal]               = useState(false)
   const [showApproveModal, setShowApproveModal] = useState(false)
   const [showDisbursalModal, setShowDisbursalModal] = useState(false)
-  const [approveItem, setApproveItem]         = useState(null)
-  const [disbursalItem, setDisbursalItem]     = useState(null)
-  const [approveForm, setApproveForm]         = useState({})
-  const [disbursalForm, setDisbursalForm]     = useState({ method: 'cash', currency: 'DOP' })
-  const [approveSaving, setApproveSaving]     = useState(false)
-  const [disbursalSaving, setDisbursalSaving] = useState(false)
-  const [bankAccounts, setBankAccounts]       = useState([])
-
-  // Formulario solicitud
-  const [form, setForm]       = useState({
-    type: 'personal', currency: 'DOP',
-    frequency: 'monthly', term_months: 3,
-    rate_monthly: 10, cuotas_manual: ''
-  })
-  const [saving, setSaving]   = useState(false)
+  const [approveItem, setApproveItem]           = useState(null)
+  const [disbursalItem, setDisbursalItem]       = useState(null)
+  const [approveForm, setApproveForm]           = useState({})
+  const [disbursalForm, setDisbursalForm]       = useState({ method: 'cash', currency: 'DOP' })
+  const [approveSaving, setApproveSaving]       = useState(false)
+  const [disbursalSaving, setDisbursalSaving]   = useState(false)
+  const [bankAccounts, setBankAccounts]         = useState([])
+  const [form, setForm]     = useState({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 10, cuotas_manual: '' })
+  const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState(null)
   const [clients, setClients]   = useState([])
   const [analisis, setAnalisis] = useState({ cuotas: [], error: '', warning: '', montoCuota: 0, totalCuotas: 0, totalInteres: 0, totalPagar: 0 })
@@ -148,46 +94,30 @@ export default function Loans() {
   const [uploading, setUploading]       = useState(false)
   const [idDocUrl, setIdDocUrl]         = useState('')
 
-  // Recalcular análisis en tiempo real
   useEffect(() => {
     setAnalisis(calcularEstructura({
-      monto:        form.amount_requested,
-      tasaMensual:  form.rate_monthly,
-      meses:        form.term_months,
-      cuotasManual: form.cuotas_manual,
-      frecuencia:   form.frequency || 'monthly',
-     ingresoNeto:  form.monthly_income ? String(form.monthly_income) : '',
-      fechaInicio:  new Date().toISOString(),
-      currency:     form.currency || 'DOP',
+      monto: form.amount_requested, tasaMensual: form.rate_monthly,
+      meses: form.term_months, cuotasManual: form.cuotas_manual,
+      frecuencia: form.frequency || 'monthly',
+      ingresoNeto: form.monthly_income ? String(form.monthly_income) : '',
+      fechaInicio: new Date().toISOString(), currency: form.currency || 'DOP',
     }))
   }, [form.amount_requested, form.rate_monthly, form.term_months, form.frequency, form.monthly_income, form.cuotas_manual, form.currency])
 
-  // Recalcular análisis del modal de aprobación
   const approveAnalisis = approveForm.approved_amount && approveForm.approved_rate
-    ? calcularEstructura({
-        monto:        approveForm.approved_amount,
-        tasaMensual:  approveForm.approved_rate,
-        meses:        approveForm.approved_term || 3,
-        cuotasManual: approveForm.cuotas_manual,
-        frecuencia:   approveForm.frequency || 'monthly',
-        fechaInicio:  approveForm.disbursement_date,
-        currency:     approveForm.currency || 'DOP',
-      })
+    ? calcularEstructura({ monto: approveForm.approved_amount, tasaMensual: approveForm.approved_rate, meses: approveForm.approved_term || 3, cuotasManual: approveForm.cuotas_manual, frecuencia: approveForm.frequency || 'monthly', fechaInicio: approveForm.disbursement_date, currency: approveForm.currency || 'DOP' })
     : { cuotas: [], montoCuota: 0, totalCuotas: 0, totalInteres: 0, totalPagar: 0 }
 
-  // ── Carga de datos ─────────────────────────────────────────
   const load = useCallback(async () => {
     if (!companyId) return
     setLoading(true)
     try {
       if (tab === 'applications') {
         const data = await db.getLoanApplications({ page, limit: 20, status, companyId })
-        setItems(data.applications || [])
-        setPagination(data.pagination || {})
+        setItems(data.applications || []); setPagination(data.pagination || {})
       } else {
         const data = await db.getLoans({ page, limit: 20, status, companyId })
-        setItems(data.loans || [])
-        setPagination(data.pagination || {})
+        setItems(data.loans || []); setPagination(data.pagination || {})
       }
     } catch (e) { console.error(e) }
     setLoading(false)
@@ -201,21 +131,14 @@ export default function Loans() {
 
   async function fetchClients() {
     try {
-      const { data: cls } = await supabase
-        .from('clients').select('id, first_name, last_name, client_code')
-        .eq('company_id', companyId).eq('status', 'active').limit(100)
+      const { data: cls } = await supabase.from('clients').select('id, first_name, last_name, client_code').eq('company_id', companyId).eq('status', 'active').limit(100)
       if (cls) setClients(cls)
     } catch (e) { console.error(e) }
   }
 
   async function fetchBankAccounts() {
     try {
-      const { data } = await supabase
-        .from('bank_accounts')
-        .select('id, label, bank_name, account_number, currency, is_primary, pix_key, swift_bic, routing_aba')
-        .eq('company_id', companyId)
-        .eq('is_active', true)
-        .order('is_primary', { ascending: false })
+      const { data } = await supabase.from('bank_accounts').select('id, label, bank_name, account_number, currency, is_primary, pix_key, swift_bic').eq('company_id', companyId).eq('is_active', true).order('is_primary', { ascending: false })
       if (data) setBankAccounts(data)
     } catch (e) { console.error(e) }
   }
@@ -227,100 +150,55 @@ export default function Loans() {
   }
 
   async function openEdit(item) {
-    setForm({
-      client_id:       item.client_id,
-      type:            item.type,
-      currency:        item.currency || 'DOP',
-      amount_requested:item.amount_requested,
-      term_months:     item.term_months,
-      purpose:         item.purpose,
-      monthly_income:  item.monthly_income,
-      analyst_notes:   item.analyst_notes,
-      frequency:       item.ai_analysis?.frequency    || 'monthly',
-      rate_monthly:    item.ai_analysis?.rate_monthly || 10,
-      cuotas_manual:   item.ai_analysis?.total_periods || '',
-    })
+    setForm({ client_id: item.client_id, type: item.type, currency: item.currency || 'DOP', amount_requested: item.amount_requested, term_months: item.term_months, purpose: item.purpose, monthly_income: item.monthly_income, analyst_notes: item.analyst_notes, frequency: item.ai_analysis?.frequency || 'monthly', rate_monthly: item.ai_analysis?.rate_monthly || 10, cuotas_manual: item.ai_analysis?.total_periods || '' })
     setSelected(item); setShowModal(true)
     await fetchClients()
   }
 
   function openApprove(item) {
     setApproveItem(item)
-    setApproveForm({
-      approved_amount:   item.amount_requested,
-      approved_rate:     item.ai_analysis?.rate_monthly || 10,
-      approved_term:     item.term_months,
-      frequency:         item.ai_analysis?.frequency    || 'monthly',
-      currency:          item.currency || 'DOP',
-      cuotas_manual:     item.ai_analysis?.total_periods || '',
-      disbursement_date: new Date().toISOString().split('T')[0],
-      conditions:        '',
-    })
+    setApproveForm({ approved_amount: item.amount_requested, approved_rate: item.ai_analysis?.rate_monthly || 10, approved_term: item.term_months, frequency: item.ai_analysis?.frequency || 'monthly', currency: item.currency || 'DOP', cuotas_manual: item.ai_analysis?.total_periods || '', disbursement_date: new Date().toISOString().split('T')[0], conditions: '' })
     setShowApproveModal(true)
+  }
+
+  async function openDisbursal(item) {
+    setDisbursalItem(item)
+    setDisbursalForm({ method: 'cash', currency: item.currency || item.ai_analysis?.currency || 'DOP', bank_account_id: '', reference: '', notes: '', disbursement_date: new Date().toISOString().split('T')[0] })
+    setShowDisbursalModal(true)
+    await fetchBankAccounts()
   }
 
   async function uploadIdDoc(file) {
     if (!file) return
     setUploading(true)
     try {
-      const ext  = file.name.split('.').pop()
+      const ext = file.name.split('.').pop()
       const path = `loan-docs/${companyId}/${Date.now()}.${ext}`
       const { error: err } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
       if (err) throw err
       const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path)
-      setIdDocUrl(urlData.publicUrl)
-      fc('id_doc_url', urlData.publicUrl)
+      setIdDocUrl(urlData.publicUrl); fc('id_doc_url', urlData.publicUrl)
     } catch { alert('Error al subir documento.') }
     setUploading(false)
   }
 
-  // ── GUARDAR SOLICITUD ─────────────────────────────────────
   async function save() {
     if (analisis.error) return
     setSaving(true)
     try {
-      const requeridos = [
-        ['client_id','Cliente'], ['amount_requested','Monto'],
-        ['term_months','Plazo'], ['purpose','Propósito'], ['monthly_income','Ingreso'],
-      ]
-      for (const [campo, label] of requeridos) {
-        if (!form[campo]) throw new Error(`El campo "${label}" es obligatorio`)
-      }
-
+      const reqs = [['client_id','Cliente'],['amount_requested','Monto'],['term_months','Plazo'],['purpose','Propósito'],['monthly_income','Ingreso']]
+      for (const [c, l] of reqs) { if (!form[c]) throw new Error(`El campo "${l}" es obligatorio`) }
       if (selected?.id) {
-        await supabase.from('loan_applications').update({
-          purpose: form.purpose, analyst_notes: form.analyst_notes || null,
-          monthly_income: parseFloat(form.monthly_income), type: form.type,
-        }).eq('id', selected.id)
+        await supabase.from('loan_applications').update({ purpose: form.purpose, analyst_notes: form.analyst_notes || null, monthly_income: parseFloat(form.monthly_income), type: form.type }).eq('id', selected.id)
       } else {
         const estadoInicial = analisis.warning ? 'in_review' : 'submitted'
         await db.createLoanApplication({
-          client_id:        form.client_id,
-          product_id:       form.product_id || null,
-          type:             form.type || 'personal',
-          amount_requested: parseFloat(form.amount_requested),
-          currency:         form.currency || 'DOP',
-          term_months:      parseFloat(form.term_months),
-          purpose:          form.purpose,
-          monthly_income:   parseFloat(form.monthly_income),
-          monthly_expenses: form.monthly_expenses ? parseFloat(form.monthly_expenses) : null,
-          payment_capacity: form.monthly_income && form.monthly_expenses
-            ? parseFloat(form.monthly_income) - parseFloat(form.monthly_expenses) : null,
-          analyst_notes: analisis.warning
-            ? `[AUTORIZACIÓN REQUERIDA]: ${form.analyst_notes || ''}` : form.analyst_notes || null,
-          ai_analysis: {
-            frequency:             form.frequency,
-            rate_monthly:          parseFloat(form.rate_monthly),
-            total_periods:         analisis.totalCuotas,
-            cuota_individual:      analisis.montoCuota,
-            total_interes:         analisis.totalInteres,
-            total_pagar:           analisis.totalPagar,
-            id_doc_url:            idDocUrl || null,
-            requiere_autorizacion: !!analisis.warning,
-            cronograma:            analisis.cuotas.map(c => ({
-              num: c.num, fecha: c.fechaVencISO, monto: c.monto,
-            })),
-          },
+          client_id: form.client_id, product_id: form.product_id || null, type: form.type || 'personal',
+          amount_requested: parseFloat(form.amount_requested), currency: form.currency || 'DOP',
+          term_months: parseFloat(form.term_months), purpose: form.purpose,
+          monthly_income: parseFloat(form.monthly_income),
+          analyst_notes: analisis.warning ? `[AUTORIZACIÓN REQUERIDA]: ${form.analyst_notes || ''}` : form.analyst_notes || null,
+          ai_analysis: { frequency: form.frequency, rate_monthly: parseFloat(form.rate_monthly), total_periods: analisis.totalCuotas, cuota_individual: analisis.montoCuota, total_interes: analisis.totalInteres, total_pagar: analisis.totalPagar, id_doc_url: idDocUrl || null, requiere_autorizacion: !!analisis.warning, cronograma: analisis.cuotas.map(c => ({ num: c.num, fecha: c.fechaVencISO, monto: c.monto })) },
           status: estadoInicial,
         }, companyId, branchId, user.id)
       }
@@ -329,247 +207,81 @@ export default function Loans() {
     setSaving(false)
   }
 
-  // ── APROBAR SOLICITUD (sin desembolsar aún) ───────────────
   async function approveApplication() {
     if (!approveItem || approveAnalisis.error) return
     setApproveSaving(true)
     try {
       await supabase.from('loan_applications').update({
-        status:          'approved',
-        approved_amount: parseFloat(approveForm.approved_amount),
-        approved_rate:   parseFloat(approveForm.approved_rate),
-        approved_term:   parseFloat(approveForm.approved_term),
-        approved_by:     user.id,
-        approved_at:     new Date().toISOString(),
-        conditions:      approveForm.conditions || null,
-        ai_analysis:     {
-          ...(approveItem.ai_analysis || {}),
-          frequency:        approveForm.frequency,
-          rate_monthly:     parseFloat(approveForm.approved_rate),
-          total_periods:    approveAnalisis.totalCuotas,
-          cuota_individual: approveAnalisis.montoCuota,
-          total_interes:    approveAnalisis.totalInteres,
-          total_pagar:      approveAnalisis.totalPagar,
-        },
+        status: 'approved', approved_amount: parseFloat(approveForm.approved_amount),
+        approved_rate: parseFloat(approveForm.approved_rate), approved_term: parseFloat(approveForm.approved_term),
+        approved_by: user.id, approved_at: new Date().toISOString(), conditions: approveForm.conditions || null,
+        ai_analysis: { ...(approveItem.ai_analysis || {}), frequency: approveForm.frequency, rate_monthly: parseFloat(approveForm.approved_rate), total_periods: approveAnalisis.totalCuotas, cuota_individual: approveAnalisis.montoCuota, total_interes: approveAnalisis.totalInteres, total_pagar: approveAnalisis.totalPagar },
       }).eq('id', approveItem.id)
-
-      setShowApproveModal(false)
-      setApproveItem(null)
-      load()
-      alert(`✅ Solicitud aprobada.\nAhora puedes proceder al desembolso desde la tabla.`)
+      setShowApproveModal(false); setApproveItem(null); load()
+      alert('✅ Solicitud aprobada. Ahora puedes proceder al desembolso.')
     } catch (err) { alert('❌ ' + err.message) }
     setApproveSaving(false)
   }
 
-  // ── ABRIR MODAL DE DESEMBOLSO ─────────────────────────────
-  async function openDisbursal(item) {
-    setDisbursalItem(item)
-    setDisbursalForm({
-      method:            'cash',
-      currency:          item.currency || item.ai_analysis?.currency || 'DOP',
-      bank_account_id:   '',
-      reference:         '',
-      notes:             '',
-      disbursement_date: new Date().toISOString().split('T')[0],
-    })
-    setShowDisbursalModal(true)
-    await fetchBankAccounts()
-  }
-
-  // ── EJECUTAR DESEMBOLSO ────────────────────────────────────
   async function executeDisbursal() {
     if (!disbursalItem) return
     setDisbursalSaving(true)
     try {
-      const item     = disbursalItem
-      const ai       = item.ai_analysis || {}
+      const item = disbursalItem
+      const ai   = item.ai_analysis || {}
       const monto    = parseFloat(item.approved_amount || item.amount_requested)
       const tasa     = parseFloat(item.approved_rate   || ai.rate_monthly || 10)
       const mesesNum = parseFloat(item.approved_term   || item.term_months || 3)
       const freq     = ai.frequency || 'monthly'
       const currency = disbursalForm.currency || item.currency || 'DOP'
-
-      // Recalcular con la fórmula correcta
-      const calc = calcularEstructura({
-        monto, tasaMensual: tasa, meses: mesesNum,
-        cuotasManual: ai.total_periods,
-        frecuencia: freq, currency,
-        fechaInicio: disbursalForm.disbursement_date,
-      })
-
+      const calc = calcularEstructura({ monto, tasaMensual: tasa, meses: mesesNum, cuotasManual: ai.total_periods, frecuencia: freq, currency, fechaInicio: disbursalForm.disbursement_date })
       if (calc.cuotas.length === 0) throw new Error('Error en el cálculo del cronograma')
-
       const totalCuotas    = calc.totalCuotas
       const cuotaMonto     = calc.montoCuota
       const cuotaPrincipal = Math.round((monto / totalCuotas) * 100) / 100
       const cuotaInteres   = Math.round((calc.totalInteres / totalCuotas) * 100) / 100
       const diasPeriodo    = freq === 'weekly' ? 7 : freq === 'biweekly' ? 15 : 30
       const fechaBase      = new Date(disbursalForm.disbursement_date)
-
-      const primerPago = new Date(fechaBase)
+      const primerPago     = new Date(fechaBase)
       if (freq === 'monthly') primerPago.setMonth(primerPago.getMonth() + 1)
       else primerPago.setDate(primerPago.getDate() + diasPeriodo)
-
       const ultimoPago = new Date(fechaBase)
       if (freq === 'monthly') ultimoPago.setMonth(ultimoPago.getMonth() + totalCuotas)
       else ultimoPago.setDate(ultimoPago.getDate() + diasPeriodo * totalCuotas)
-
-      // Código secuencial
-      const { count: loanCount } = await supabase
-        .from('loans').select('*', { count: 'exact', head: true }).eq('company_id', companyId)
+      const { count: loanCount } = await supabase.from('loans').select('*', { count: 'exact', head: true }).eq('company_id', companyId)
       const loan_code = `HPA-L-${String((loanCount || 0) + 1).padStart(4, '0')}`
-
-      // 1. Crear préstamo
       const { data: loanData, error: loanError } = await supabase.from('loans').insert({
-        company_id:         companyId,
-        branch_id:          branchId,
-        client_id:          item.client_id,
-        application_id:     item.id,
-        product_id:         item.product_id || null,
-        loan_code,
-        type:               item.type,
-        currency,
-        principal:          monto,
-        rate_monthly:       tasa,
-        rate_annual:        tasa * 12,
-        term_months:        mesesNum,
-        payment_amount:     cuotaMonto,
-        total_interest:     calc.totalInteres,
-        total_amount:       calc.totalPagar,
-        origination_fee:    0,
-        balance_principal:  monto,
-        balance_interest:   0,
-        balance_penalties:  0,
-        balance_total:      calc.totalPagar,
-        disbursed_at:       disbursalForm.disbursement_date,
+        company_id: companyId, branch_id: branchId, client_id: item.client_id,
+        application_id: item.id, product_id: item.product_id || null, loan_code,
+        type: item.type, currency, principal: monto, rate_monthly: tasa, rate_annual: tasa * 12,
+        term_months: mesesNum, payment_amount: cuotaMonto, total_interest: calc.totalInteres,
+        total_amount: calc.totalPagar, origination_fee: 0, balance_principal: monto,
+        balance_interest: 0, balance_penalties: 0, balance_total: calc.totalPagar,
+        disbursed_at: disbursalForm.disbursement_date,
         first_payment_date: primerPago.toISOString().split('T')[0],
         last_payment_date:  ultimoPago.toISOString().split('T')[0],
         next_payment_date:  primerPago.toISOString().split('T')[0],
-        status:             'active',
-        days_overdue:       0,
-        disbursed_by:       user.id,
+        status: 'active', days_overdue: 0, disbursed_by: user.id,
       }).select().single()
-
       if (loanError) throw new Error('Error al crear préstamo: ' + loanError.message)
-
-      // 2. Cronograma
       const { error: schedError } = await supabase.from('loan_schedule').insert(
-        calc.cuotas.map(c => ({
-          loan_id:         loanData.id,
-          installment_num: c.num,
-          due_date:        c.fechaVencISO,
-          principal:       c.principal,
-          interest:        c.interes,
-          total_due:       c.monto,
-          principal_paid:  0,
-          interest_paid:   0,
-          penalty_paid:    0,
-          total_paid:      0,
-          balance:         c.saldoRestante,
-          status:          'pending',
-          days_overdue:    0,
-          penalty_amount:  0,
-        }))
+        calc.cuotas.map(c => ({ loan_id: loanData.id, installment_num: c.num, due_date: c.fechaVencISO, principal: c.principal, interest: c.interes, total_due: c.monto, principal_paid: 0, interest_paid: 0, penalty_paid: 0, total_paid: 0, balance: c.saldoRestante, status: 'pending', days_overdue: 0, penalty_amount: 0 }))
       )
       if (schedError) throw new Error('Error al crear cronograma: ' + schedError.message)
-
-      // 3. Caso de cobranza
-      await supabase.from('collection_cases').insert({
-        company_id:       companyId,
-        branch_id:        branchId,
-        client_id:        item.client_id,
-        loan_id:          loanData.id,
-        stage:            'preventive',
-        status:           'open',
-        days_overdue:     0,
-        amount_overdue:   0,
-        installments_due: 0,
-      })
-
-      // 4. Registrar desembolso en caja si hay sesión abierta
+      await supabase.from('collection_cases').insert({ company_id: companyId, branch_id: branchId, client_id: item.client_id, loan_id: loanData.id, stage: 'preventive', status: 'open', days_overdue: 0, amount_overdue: 0, installments_due: 0 })
       if (disbursalForm.method === 'cash') {
-        const { data: openSession } = await supabase
-          .from('cash_sessions')
-          .select('id, opening_balance, total_income, total_expense')
-          .eq('status', 'open')
-          .eq('register_id', (
-            await supabase.from('cash_registers')
-              .select('id').eq('company_id', companyId)
-              .eq('status', 'open').limit(1).single()
-              .then(r => r.data?.id)
-          ))
-          .single()
-
-        if (openSession) {
-          const { count: mvCount } = await supabase
-            .from('cash_movements')
-            .select('*', { count: 'exact', head: true })
-            .eq('session_id', openSession.id)
-
-          const current = (openSession.opening_balance || 0) +
-                          (openSession.total_income    || 0) -
-                          (openSession.total_expense   || 0)
-
-          await supabase.from('cash_movements').insert({
-            session_id:     openSession.id,
-            company_id:     companyId,
-            movement_number:`MV-${String((mvCount || 0) + 1).padStart(4, '0')}`,
-            type:           'expense',
-            category:       'loan_disbursement',
-            reference_type: 'loan',
-            reference_id:   loanData.id,
-            amount:         monto,
-            currency,
-            fx_rate:        1,
-            amount_base:    monto,
-            balance_after:  Math.max(0, current - monto),
-            description:    `Desembolso préstamo ${loan_code} — ${item.clients?.first_name || ''} ${item.clients?.last_name || ''}`,
-            client_id:      item.client_id,
-            created_by:     user.id,
-          })
+        const { data: openReg } = await supabase.from('cash_registers').select('id').eq('company_id', companyId).eq('status', 'open').limit(1).single()
+        if (openReg) {
+          const { data: openSession } = await supabase.from('cash_sessions').select('id, opening_balance, total_income, total_expense').eq('register_id', openReg.id).eq('status', 'open').single()
+          if (openSession) {
+            const { count: mvCount } = await supabase.from('cash_movements').select('*', { count: 'exact', head: true }).eq('session_id', openSession.id)
+            const current = (openSession.opening_balance || 0) + (openSession.total_income || 0) - (openSession.total_expense || 0)
+            await supabase.from('cash_movements').insert({ session_id: openSession.id, company_id: companyId, movement_number: `MV-${String((mvCount || 0) + 1).padStart(4, '0')}`, type: 'expense', category: 'loan_disbursement', reference_type: 'loan', reference_id: loanData.id, amount: monto, currency, fx_rate: 1, amount_base: monto, balance_after: Math.max(0, current - monto), description: `Desembolso préstamo ${loan_code}`, client_id: item.client_id, created_by: user.id })
+          }
         }
       }
-
-      // 5. Registrar transferencia bancaria si aplica
-      if (disbursalForm.method !== 'cash' && disbursalForm.bank_account_id) {
-        const { count: trfCount } = await supabase
-          .from('bank_transfers')
-          .select('*', { count: 'exact', head: true })
-          .eq('company_id', companyId)
-
-        await supabase.from('bank_transfers').insert({
-          company_id:      companyId,
-          transfer_code:   `TRF-${String((trfCount || 0) + 1).padStart(5, '0')}`,
-          from_account_id: disbursalForm.bank_account_id,
-          amount:          monto,
-          currency,
-          fx_rate:         1,
-          amount_base:     monto,
-          fees:            0,
-          type:            disbursalForm.method,
-          reference:       disbursalForm.reference || loan_code,
-          description:     `Desembolso préstamo ${loan_code}`,
-          status:          'completed',
-          reference_type:  'loan',
-          reference_id:    loanData.id,
-          client_id:       item.client_id,
-          initiated_by:    user.id,
-          approved_by:     user.id,
-          executed_at:     new Date().toISOString(),
-        })
-      }
-
-      setShowDisbursalModal(false)
-      setDisbursalItem(null)
-      load()
-
-      alert(
-        `✅ Préstamo desembolsado exitosamente.\n` +
-        `Código: ${loan_code}\n` +
-        `Monto: ${fmtCurrency(monto, currency)}\n` +
-        `${totalCuotas} cuotas de ${fmtCurrency(cuotaMonto, currency)}\n` +
-        `Método: ${disbursalForm.method === 'cash' ? 'Efectivo' : disbursalForm.method.toUpperCase()}`
-      )
+      setShowDisbursalModal(false); setDisbursalItem(null); load()
+      alert(`✅ Préstamo desembolsado.\nCódigo: ${loan_code}\nMonto: ${fmtCurrency(monto, currency)}\n${totalCuotas} cuotas de ${fmtCurrency(cuotaMonto, currency)}`)
     } catch (err) { alert('❌ ' + err.message) }
     setDisbursalSaving(false)
   }
@@ -577,19 +289,13 @@ export default function Loans() {
   async function rejectApplication(item) {
     if (!confirm(`¿Rechazar la solicitud ${item.application_code}?`)) return
     try {
-      await supabase.from('loan_applications').update({
-        status:           'rejected',
-        rejected_by:      user.id,
-        rejected_at:      new Date().toISOString(),
-        rejection_reason: 'Rechazada por el analista',
-      }).eq('id', item.id)
+      await supabase.from('loan_applications').update({ status: 'rejected', rejected_by: user.id, rejected_at: new Date().toISOString(), rejection_reason: 'Rechazada por el analista' }).eq('id', item.id)
       load()
     } catch (err) { alert(err.message) }
   }
 
   const tipoLabel = { weekly: 'Semanal', biweekly: 'Quincenal', monthly: 'Mensual' }
   const TABS = [{ id: 'applications', label: 'Solicitudes' }, { id: 'loans', label: 'Préstamos Activos' }]
-
   const methodOptions = [
     { value: 'cash',     label: '💵 Efectivo' },
     { value: 'pix',      label: '⚡ PIX' },
@@ -609,9 +315,7 @@ export default function Loans() {
       </div>
 
       <div className="card p-0">
-        <div className="px-5 pt-4">
-          <Tabs tabs={TABS} active={tab} onChange={t => { setTab(t); setPage(1) }} />
-        </div>
+        <div className="px-5 pt-4"><Tabs tabs={TABS} active={tab} onChange={t => { setTab(t); setPage(1) }} /></div>
         <div className="p-4 border-b border-hpa-slate-2">
           <select className="select w-48" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}>
             <option value="">Todos los estados</option>
@@ -621,7 +325,6 @@ export default function Loans() {
             }
           </select>
         </div>
-
         <div className="table-wrapper">
           <table className="table">
             <thead>
@@ -634,8 +337,6 @@ export default function Loans() {
                 <tr><td colSpan={8}><Empty icon={CreditCard} title="Sin registros" desc="Registra la primera solicitud de préstamo" /></td></tr>
               ) : items.map(item => {
                 const ai = item.ai_analysis || {}
-                const cuotas = ai.total_periods || '—'
-                const freq   = tipoLabel[ai.frequency] || '—'
                 return (
                   <tr key={item.id}>
                     <td className="font-mono text-xs font-semibold text-hpa-700">{item.application_code || item.loan_code}</td>
@@ -648,8 +349,8 @@ export default function Loans() {
                       <p className="text-xs text-hpa-slate-5">{item.currency}</p>
                     </td>
                     <td>
-                      <p className="font-semibold">{cuotas} cuotas</p>
-                      <p className="text-xs text-hpa-slate-5">{freq}</p>
+                      <p className="font-semibold">{ai.total_periods || '—'} cuotas</p>
+                      <p className="text-xs text-hpa-slate-5">{tipoLabel[ai.frequency] || '—'}</p>
                     </td>
                     <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
                     <td><StatusBadge status={item.status} /></td>
@@ -665,12 +366,8 @@ export default function Loans() {
                         )}
                         {item.status === 'approved' && (
                           <>
-                            <button
-                              className="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100"
-                              onClick={() => openDisbursal(item)}
-                            >
-                              <DollarSign size={13} />
-                              <span className="ml-1 text-xs font-semibold">Desembolsar</span>
+                            <button className="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100" onClick={() => openDisbursal(item)}>
+                              <DollarSign size={13} /><span className="ml-1 text-xs font-semibold">Desembolsar</span>
                             </button>
                             <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(item)}><Edit2 size={13} /></button>
                           </>
@@ -689,7 +386,7 @@ export default function Loans() {
         <Pagination page={page} pages={pagination.pages} total={pagination.total} limit={20} onChange={setPage} />
       </div>
 
-      {/* ── MODAL NUEVA / EDITAR SOLICITUD ─────────────────── */}
+      {/* MODAL NUEVA / EDITAR SOLICITUD */}
       <Modal open={showModal} onClose={() => { setShowModal(false); setSelected(null) }}
         title={selected ? 'Editar Solicitud' : 'Nueva Solicitud de Préstamo'} size="xl"
         footer={
@@ -745,20 +442,19 @@ export default function Loans() {
               </div>
             )}
           </div>
-
           <div>
             <p className="form-section-title">Condiciones del Préstamo</p>
             <div className="grid grid-cols-4 gap-3">
               <Field label="Moneda" required>
                 <select className="select" value={form.currency || 'DOP'} onChange={e => fc('currency', e.target.value)}>
-                  {Object.entries(CURRENCIES).map(([k, v]) =>
-                    <option key={k} value={k}>{v.flag} {k} — {v.label}</option>
-                  )}
+                  {Object.entries(CURRENCIES).map(([k, v]) => <option key={k} value={k}>{v.flag} {k} — {v.label}</option>)}
                 </select>
               </Field>
               <Field label="Monto Solicitado" required>
-  value={form.amount_requested || ''} onChange={e => fc('amount_requested', e.target.value)} />
-                <Field label="Tasa Mensual (%)" required>
+                <input className="input" type="number" placeholder="0.00"
+                  value={form.amount_requested || ''} onChange={e => fc('amount_requested', e.target.value)} />
+              </Field>
+              <Field label="Tasa Mensual (%)" required>
                 <input className="input" type="number" step="0.5" placeholder="10"
                   value={form.rate_monthly || ''} onChange={e => fc('rate_monthly', e.target.value)} />
               </Field>
@@ -775,14 +471,13 @@ export default function Loans() {
                 <input className="input" type="number" step="0.5" placeholder="2.5 o 3"
                   value={form.term_months || ''} onChange={e => { fc('term_months', e.target.value); fc('cuotas_manual', '') }} />
               </Field>
-              <Field label={`Número de Cuotas ${analisis.totalCuotas ? `(sugerido: ${calcularEstructura({ monto: form.amount_requested, tasaMensual: form.rate_monthly, meses: form.term_months, frecuencia: form.frequency, currency: form.currency }).totalCuotas})` : ''}`}>
+              <Field label={`Número de Cuotas${analisis.totalCuotas ? ` (sugerido: ${analisis.totalCuotas})` : ''}`}>
                 <input className="input" type="number" min="1" step="1"
                   placeholder={`Sugerido: ${analisis.totalCuotas || '—'}`}
-                  value={form.cuotas_manual || ''}
-                  onChange={e => fc('cuotas_manual', e.target.value)} />
+                  value={form.cuotas_manual || ''} onChange={e => fc('cuotas_manual', e.target.value)} />
               </Field>
               <Field label="Ingreso Mensual Neto" required>
-                <Field label="Monto Solicitado" required>
+                <input className="input" type="number" placeholder="0.00"
                   value={form.monthly_income || ''} onChange={e => fc('monthly_income', e.target.value)} />
               </Field>
             </div>
@@ -793,8 +488,6 @@ export default function Loans() {
               </Field>
             </div>
           </div>
-
-          {/* Simulador */}
           {analisis.cuotas.length > 0 && (
             <div className="bg-hpa-slate-1 rounded-xl p-4 border border-hpa-slate-3 space-y-3">
               <div className="flex justify-between items-center">
@@ -809,22 +502,10 @@ export default function Loans() {
                 </button>
               </div>
               <div className="grid grid-cols-4 gap-2 text-center bg-white p-3 rounded-lg border border-hpa-slate-2 text-xs">
-                <div>
-                  <p className="text-hpa-slate-5">Cuota</p>
-                  <p className="font-bold text-hpa-700 font-numeric">{fmtCurrency(analisis.montoCuota, form.currency)}</p>
-                </div>
-                <div>
-                  <p className="text-hpa-slate-5">Interés Total</p>
-                  <p className="font-bold text-amber-600 font-numeric">{fmtCurrency(analisis.totalInteres, form.currency)}</p>
-                </div>
-                <div>
-                  <p className="text-hpa-slate-5">Total a Pagar</p>
-                  <p className="font-bold text-hpa-slate-9 font-numeric">{fmtCurrency(analisis.totalPagar, form.currency)}</p>
-                </div>
-                <div>
-                  <p className="text-hpa-slate-5">Capital</p>
-                  <p className="font-bold text-emerald-600 font-numeric">{fmtCurrency(form.amount_requested || 0, form.currency)}</p>
-                </div>
+                <div><p className="text-hpa-slate-5">Cuota</p><p className="font-bold text-hpa-700 font-numeric">{fmtCurrency(analisis.montoCuota, form.currency)}</p></div>
+                <div><p className="text-hpa-slate-5">Interés Total</p><p className="font-bold text-amber-600 font-numeric">{fmtCurrency(analisis.totalInteres, form.currency)}</p></div>
+                <div><p className="text-hpa-slate-5">Total a Pagar</p><p className="font-bold text-hpa-slate-9 font-numeric">{fmtCurrency(analisis.totalPagar, form.currency)}</p></div>
+                <div><p className="text-hpa-slate-5">Capital</p><p className="font-bold text-emerald-600 font-numeric">{fmtCurrency(form.amount_requested || 0, form.currency)}</p></div>
               </div>
               {showSchedule && (
                 <div className="max-h-52 overflow-y-auto bg-white rounded-lg border border-hpa-slate-2">
@@ -847,7 +528,6 @@ export default function Loans() {
               )}
             </div>
           )}
-
           <Field label="Notas del Analista">
             <textarea className="input h-16 resize-none" placeholder="Observaciones, condiciones especiales..."
               value={form.analyst_notes || ''} onChange={e => fc('analyst_notes', e.target.value)} />
@@ -855,7 +535,7 @@ export default function Loans() {
         </div>
       </Modal>
 
-      {/* ── MODAL APROBACIÓN ───────────────────────────────── */}
+      {/* MODAL APROBACIÓN */}
       <Modal open={showApproveModal} onClose={() => { setShowApproveModal(false); setApproveItem(null) }}
         title="✅ Aprobar Solicitud" size="lg"
         footer={
@@ -933,7 +613,7 @@ export default function Loans() {
         )}
       </Modal>
 
-      {/* ── MODAL DESEMBOLSO ──────────────────────────────── */}
+      {/* MODAL DESEMBOLSO */}
       <Modal open={showDisbursalModal} onClose={() => { setShowDisbursalModal(false); setDisbursalItem(null) }}
         title="💰 Desembolsar Préstamo" size="lg"
         footer={
@@ -946,32 +626,18 @@ export default function Loans() {
         }>
         {disbursalItem && (
           <div className="space-y-4">
-            {/* Resumen */}
             <div className="p-4 bg-hpa-slate-1 rounded-xl">
               <p className="font-bold text-hpa-slate-9">{disbursalItem.clients?.first_name} {disbursalItem.clients?.last_name}</p>
               <p className="text-xs text-hpa-slate-5 mb-3">{disbursalItem.application_code} · {disbursalItem.purpose}</p>
               <div className="grid grid-cols-3 gap-3 text-center text-xs">
-                <div>
-                  <p className="text-hpa-slate-5">Monto Aprobado</p>
-                  <p className="font-bold text-hpa-slate-9 font-numeric text-sm">
-                    {fmtCurrency(disbursalItem.approved_amount || disbursalItem.amount_requested, disbursalItem.currency)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-hpa-slate-5">Cuotas</p>
-                  <p className="font-bold text-hpa-slate-9">{disbursalItem.ai_analysis?.total_periods || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-hpa-slate-5">Frecuencia</p>
-                  <p className="font-bold text-hpa-slate-9">{tipoLabel[disbursalItem.ai_analysis?.frequency] || '—'}</p>
-                </div>
+                <div><p className="text-hpa-slate-5">Monto Aprobado</p><p className="font-bold text-hpa-slate-9 font-numeric text-sm">{fmtCurrency(disbursalItem.approved_amount || disbursalItem.amount_requested, disbursalItem.currency)}</p></div>
+                <div><p className="text-hpa-slate-5">Cuotas</p><p className="font-bold text-hpa-slate-9">{disbursalItem.ai_analysis?.total_periods || '—'}</p></div>
+                <div><p className="text-hpa-slate-5">Frecuencia</p><p className="font-bold text-hpa-slate-9">{tipoLabel[disbursalItem.ai_analysis?.frequency] || '—'}</p></div>
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-3">
               <Field label="Fecha de Desembolso" required>
-                <input className="input" type="date" value={disbursalForm.disbursement_date || ''}
-                  onChange={e => dfc('disbursement_date', e.target.value)} />
+                <input className="input" type="date" value={disbursalForm.disbursement_date || ''} onChange={e => dfc('disbursement_date', e.target.value)} />
               </Field>
               <Field label="Moneda del Desembolso">
                 <select className="select" value={disbursalForm.currency || 'DOP'} onChange={e => dfc('currency', e.target.value)}>
@@ -979,7 +645,6 @@ export default function Loans() {
                 </select>
               </Field>
             </div>
-
             <Field label="Método de Desembolso" required>
               <div className="grid grid-cols-2 gap-2">
                 {methodOptions.map(m => (
@@ -991,14 +656,10 @@ export default function Loans() {
                 ))}
               </div>
             </Field>
-
-            {/* Si no es efectivo, mostrar cuentas bancarias */}
             {disbursalForm.method !== 'cash' && (
               <Field label="Cuenta Bancaria de Origen">
                 {bankAccounts.length === 0 ? (
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-                    ⚠️ No hay cuentas bancarias registradas. Ve a Cuentas Bancarias para agregar una.
-                  </div>
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">⚠️ No hay cuentas bancarias registradas.</div>
                 ) : (
                   <div className="space-y-2">
                     {bankAccounts.map(acc => (
@@ -1009,13 +670,8 @@ export default function Loans() {
                           <div>
                             <p className="text-xs font-bold text-hpa-slate-9">{acc.label}</p>
                             <p className="text-xs text-hpa-slate-5">{acc.bank_name} · {acc.account_number}</p>
-                            {acc.pix_key && <p className="text-xs text-hpa-slate-5">PIX: {acc.pix_key}</p>}
-                            {acc.swift_bic && <p className="text-xs text-hpa-slate-5">SWIFT: {acc.swift_bic}</p>}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className={`badge ${acc.currency === 'BRL' ? 'badge-green' : acc.currency === 'USD' ? 'badge-blue' : 'badge-gray'}`}>{acc.currency}</span>
-                            {acc.is_primary && <span className="text-xs text-amber-600">⭐ Principal</span>}
-                          </div>
+                          <span className="badge badge-blue">{acc.currency}</span>
                         </div>
                       </div>
                     ))}
@@ -1023,26 +679,18 @@ export default function Loans() {
                 )}
               </Field>
             )}
-
             <div className="grid grid-cols-2 gap-3">
               <Field label="Referencia / Número de Operación">
-                <input className="input" placeholder="Ej: TRF-20260712..."
-                  value={disbursalForm.reference || ''} onChange={e => dfc('reference', e.target.value)} />
+                <input className="input" placeholder="Ej: TRF-20260712..." value={disbursalForm.reference || ''} onChange={e => dfc('reference', e.target.value)} />
               </Field>
               <Field label="Notas">
-                <input className="input" placeholder="Observaciones opcionales..."
-                  value={disbursalForm.notes || ''} onChange={e => dfc('notes', e.target.value)} />
+                <input className="input" placeholder="Observaciones opcionales..." value={disbursalForm.notes || ''} onChange={e => dfc('notes', e.target.value)} />
               </Field>
             </div>
-
-            {/* Aviso caja */}
             {disbursalForm.method === 'cash' && (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
                 <Building2 size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-blue-800">
-                  El desembolso en efectivo se registrará automáticamente como egreso en la caja activa.
-                  Si no hay caja abierta, el préstamo se crea pero el movimiento de caja deberá registrarse manualmente.
-                </p>
+                <p className="text-xs text-blue-800">El desembolso en efectivo se registrará automáticamente como egreso en la caja activa.</p>
               </div>
             )}
           </div>
