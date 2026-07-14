@@ -1,328 +1,249 @@
-import { NavLink, useNavigate, Outlet } from 'react-router-dom'
-import {
-  LayoutDashboard, Users, TrendingUp, CreditCard,
-  PhoneCall, Landmark, Briefcase, Bot, BarChart3,
-  Shield, Settings, LogOut, Bell, ChevronDown,
-  Menu, X, User, Building2
-} from 'lucide-react'
-import { clsx } from 'clsx'
-import useAuthStore from '@/store/auth'
-import { useState, useRef, useEffect } from 'react'
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-const NAV = [
-  { to: '/dashboard',   icon: LayoutDashboard, label: 'Dashboard',      module: 'dashboard'   },
-  { to: '/clients',     icon: Users,           label: 'Clientes',       module: 'clients'     },
-  { to: '/investments', icon: TrendingUp,      label: 'Inversiones',    module: 'investments' },
-  { to: '/loans',       icon: CreditCard,      label: 'Préstamos',      module: 'loans'       },
-  { to: '/collections', icon: PhoneCall,       label: 'Cobranza',       module: 'collections' },
-  { to: '/cash',        icon: Landmark,        label: 'Caja',           module: 'cash'        },
-  { to: '/employees',   icon: Briefcase,       label: 'Empleados',      module: 'employees'   },
-  { to: '/ai',          icon: Bot,             label: 'FIIRMAOSHPA AI', module: 'ai'          },
-  { to: '/reports',     icon: BarChart3,       label: 'Reportes',       module: 'reports'     },
-  { to: '/audit',       icon: Shield,          label: 'Auditoría',      module: 'audit'       },
-  { to: '/settings',    icon: Settings,        label: 'Configuración',  module: 'config'      },
-]
+@layer base {
+  :root {
+    /* Paleta original azul */
+    --hpa-900: #071428;
+    --hpa-800: #0D2147;
+    --hpa-700: #122D5E;
+    --hpa-600: #1A3F7E;
+    --hpa-500: #2252A0;
+    --hpa-gold: #C9A84C;
+    --hpa-gold-light: #D4AF6A;
+    --hpa-gold-dark: #9C7B2E;
+    --hpa-green: #10B981;
+    --hpa-red: #EF4444;
+    --hpa-amber: #F59E0B;
 
-// ── Dropdown perfil ──────────────────────────────────────
-function ProfileDropdown({ user, onLogout }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  const navigate = useNavigate()
+    /* Paleta negro/dorado FIIRMAOSHPA */
+    --dark-950: #080808;
+    --dark-900: #0D0D0D;
+    --dark-800: #141414;
+    --dark-700: #1C1C1C;
+    --dark-600: #242424;
+    --dark-500: #2E2E2E;
+    --dark-border: rgba(201,168,76,0.15);
+    --dark-border-hover: rgba(201,168,76,0.35);
+    --gold-primary: #C9A84C;
+    --gold-light: #D4AF6A;
+    --gold-dim: rgba(201,168,76,0.12);
 
-  useEffect(() => {
-    function handle(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
-  }, [])
+    --sidebar-width: 240px;
+    --header-height: 60px;
 
-  const initials = user?.full_name
-    ?.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U'
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
-      >
-        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--gold-primary)', color: 'var(--dark-900)' }}>
-          {initials}
-        </div>
-        <div className="hidden md:block text-left">
-          <p className="text-sm font-semibold leading-tight" style={{ color: 'rgba(255,255,255,0.9)' }}>
-            {user?.full_name?.split(' ')[0]}
-          </p>
-          <p className="text-2xs leading-tight" style={{ color: 'var(--gold-primary)' }}>
-            {user?.role?.name || 'Super Admin'}
-          </p>
-        </div>
-        <ChevronDown size={13} className={`hidden md:block transition-transform ${open ? 'rotate-180' : ''}`}
-          style={{ color: 'rgba(255,255,255,0.4)' }} />
-      </button>
-
-      {open && (
-        <div className="absolute right-0 top-full mt-2 w-68 rounded-xl shadow-2xl z-50 overflow-hidden border"
-          style={{ background: 'var(--dark-800)', borderColor: 'var(--dark-border)', width: '17rem' }}>
-
-          {/* Header */}
-          <div className="p-4" style={{ background: 'var(--dark-900)', borderBottom: '1px solid var(--dark-border)' }}>
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
-                style={{ background: 'var(--gold-primary)', color: 'var(--dark-900)' }}>
-                {initials}
-              </div>
-              <div className="min-w-0">
-                <p className="font-bold text-sm leading-tight truncate" style={{ color: 'rgba(255,255,255,0.95)' }}>
-                  {user?.full_name}
-                </p>
-                <p className="text-xs leading-tight mt-0.5" style={{ color: 'var(--gold-primary)' }}>
-                  {user?.role?.name || 'Super Administrador'}
-                </p>
-                <p className="text-2xs leading-tight truncate" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                  {user?.email}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Empresa */}
-          <div className="px-4 py-2.5" style={{ borderBottom: '1px solid var(--dark-border)' }}>
-            <p className="text-2xs uppercase tracking-wider font-bold mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
-              Empresa
-            </p>
-            <p className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.8)' }}>
-              {user?.company?.name || 'FIIRMAOSHPA'}
-            </p>
-            <p className="text-2xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
-              {user?.branch?.name || 'Sede Principal'}
-            </p>
-          </div>
-
-          {/* Acciones */}
-          <div className="p-2">
-            {[
-              { icon: User,     label: 'Mi Perfil',     sub: 'Ver perfil de empleado', to: '/employees' },
-              { icon: Settings, label: 'Configuración', sub: 'Parámetros del sistema',  to: '/settings'  },
-              { icon: Shield,   label: 'Auditoría',     sub: 'Historial de acciones',   to: '/audit'     },
-            ].map(item => (
-              <button key={item.to}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-left"
-                style={{ color: 'rgba(255,255,255,0.7)' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--dark-700)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                onClick={() => { navigate(item.to); setOpen(false) }}>
-                <item.icon size={14} style={{ color: 'var(--gold-primary)' }} />
-                <div>
-                  <p className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.85)' }}>{item.label}</p>
-                  <p className="text-2xs" style={{ color: 'rgba(255,255,255,0.35)' }}>{item.sub}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {/* Logout */}
-          <div className="p-2" style={{ borderTop: '1px solid var(--dark-border)' }}>
-            <button
-              onClick={() => { onLogout(); setOpen(false) }}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-left"
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <LogOut size={14} className="text-red-400" />
-              <p className="text-sm font-medium text-red-400">Cerrar Sesión</p>
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Sidebar ──────────────────────────────────────────────
-function Sidebar({ open, onClose }) {
-  const { user, logout, hasPermission } = useAuthStore()
-  const navigate = useNavigate()
-
-  async function handleLogout() {
-    await logout()
-    navigate('/login')
+    /* Font size base — controlado por preferencia */
+    --font-size-base: 15px;
   }
 
-  const initials = user?.full_name
-    ?.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U'
+  /* Temas de fuente */
+  [data-font-size="small"]  { --font-size-base: 13px; }
+  [data-font-size="normal"] { --font-size-base: 15px; }
+  [data-font-size="large"]  { --font-size-base: 17px; }
 
-  return (
-    <>
-      {/* Overlay mobile */}
-      {open && (
-        <div
-          className="fixed inset-0 z-30 lg:hidden"
-          style={{ background: 'rgba(0,0,0,0.7)' }}
-          onClick={onClose}
-        />
-      )}
-
-      <aside
-        className={clsx(
-          'fixed inset-y-0 left-0 flex flex-col z-40 transition-transform duration-300 sidebar-dark',
-          'lg:translate-x-0',
-          open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-        )}
-        style={{ width: '240px' }}
-      >
-        {/* Logo */}
-        <div className="px-4 py-5" style={{ borderBottom: '1px solid var(--dark-border)' }}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {/* Logo imagen o fallback */}
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden"
-                style={{ background: 'var(--gold-dim)', border: '1px solid var(--dark-border-hover)' }}>
-                <Building2 size={16} style={{ color: 'var(--gold-primary)' }} />
-              </div>
-              <div>
-                <p className="font-bold text-sm leading-tight" style={{ color: 'var(--gold-primary)' }}>
-                  FIIRMAOSHPA
-                </p>
-                <p className="text-2xs leading-tight" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                  v4 Enterprise
-                </p>
-              </div>
-            </div>
-            <button onClick={onClose} className="lg:hidden p-1 rounded"
-              style={{ color: 'rgba(255,255,255,0.4)' }}>
-              <X size={16} />
-            </button>
-          </div>
-          <div className="gold-bar mt-4" style={{ opacity: 0.4 }} />
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-          {NAV.map(({ to, icon: Icon, label, module }) => {
-            if (module !== 'dashboard' && !hasPermission(module)) return null
-            return (
-              <NavLink key={to} to={to} onClick={onClose}
-                className={({ isActive }) => clsx('sidebar-link', isActive && 'active')}>
-                <Icon className="icon" />
-                <span>{label}</span>
-              </NavLink>
-            )
-          })}
-        </nav>
-
-        {/* User info */}
-        <div className="px-3 py-4" style={{ borderTop: '1px solid var(--dark-border)' }}>
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg mb-2"
-            style={{ background: 'var(--dark-700)' }}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-              style={{ background: 'var(--gold-primary)', color: 'var(--dark-900)' }}>
-              {initials}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold truncate" style={{ color: 'rgba(255,255,255,0.9)' }}>
-                {user?.full_name}
-              </p>
-              <p className="text-2xs truncate" style={{ color: 'var(--gold-primary)' }}>
-                {user?.role?.name || 'Super Admin'}
-              </p>
-            </div>
-          </div>
-          <button onClick={handleLogout}
-            className="sidebar-link w-full"
-            style={{ color: 'rgba(239,68,68,0.7)' }}
-            onMouseEnter={e => {
-              e.currentTarget.style.color = '#EF4444'
-              e.currentTarget.style.background = 'rgba(239,68,68,0.08)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = 'rgba(239,68,68,0.7)'
-              e.currentTarget.style.background = 'transparent'
-            }}>
-            <LogOut className="icon" />
-            <span>Cerrar sesión</span>
-          </button>
-        </div>
-      </aside>
-    </>
-  )
-}
-
-// ── Header ───────────────────────────────────────────────
-function Header({ onMenuToggle }) {
-  const { user, logout } = useAuthStore()
-  const navigate = useNavigate()
-
-  async function handleLogout() {
-    await logout()
-    navigate('/login')
+  * { box-sizing: border-box; }
+  html {
+    font-size: var(--font-size-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    @apply bg-hpa-slate-2 text-hpa-slate-9 font-body;
+    margin: 0; padding: 0;
   }
 
-  return (
-    <header
-      className="fixed top-0 right-0 z-30 flex items-center justify-between px-4 md:px-6 header-dark"
-      style={{
-        left: 'var(--sidebar-width)',
-        height: 'var(--header-height)',
-      }}
-    >
-      {/* Hamburger — mobile */}
-      <button
-        onClick={onMenuToggle}
-        className="lg:hidden p-2 rounded-lg transition-colors"
-        style={{ color: 'rgba(255,255,255,0.6)' }}
-        onMouseEnter={e => e.currentTarget.style.background = 'var(--dark-700)'}
-        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-      >
-        <Menu size={20} />
-      </button>
-
-      {/* Fecha — desktop */}
-      <div className="hidden lg:block">
-        <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          {new Date().toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-        </p>
-      </div>
-
-      {/* Right */}
-      <div className="flex items-center gap-2 ml-auto">
-        {/* Notificaciones */}
-        <button className="relative p-2 rounded-lg transition-colors"
-          style={{ color: 'rgba(255,255,255,0.5)' }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--dark-700)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-          <Bell size={17} />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full border-2"
-            style={{ background: '#EF4444', borderColor: 'var(--dark-900)' }} />
-        </button>
-
-        {/* Separador */}
-        <div className="w-px h-5 hidden md:block" style={{ background: 'var(--dark-border)' }} />
-
-        {/* Perfil */}
-        <ProfileDropdown user={user} onLogout={handleLogout} />
-      </div>
-    </header>
-  )
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-hpa-slate-4 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--gold-primary); }
 }
 
-// ── Layout principal ─────────────────────────────────────
-export default function Layout() {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+@layer components {
 
-  return (
-    <div className="min-h-screen bg-hpa-slate-2">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div
-        className="transition-all duration-300 lg:ml-[240px]"
-        style={{ paddingTop: 'var(--header-height)' }}
-      >
-        <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="p-4 md:p-6">
-          <Outlet />
-        </main>
-      </div>
-    </div>
-  )
+  /* ── SIDEBAR NEGRO/DORADO ───────────────────────────── */
+  .sidebar-dark {
+    background: var(--dark-900);
+    border-right: 1px solid var(--dark-border);
+  }
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+           transition-all duration-150 cursor-pointer select-none;
+    color: rgba(255,255,255,0.5);
+  }
+  .sidebar-link:hover {
+    color: rgba(255,255,255,0.85);
+    background: var(--dark-700);
+  }
+  .sidebar-link.active {
+    color: var(--gold-primary);
+    background: var(--gold-dim);
+    border-left: 2px solid var(--gold-primary);
+    padding-left: calc(0.75rem - 2px);
+  }
+  .sidebar-link .icon {
+    @apply w-4 h-4 flex-shrink-0;
+  }
+
+  /* ── HEADER NEGRO/DORADO ────────────────────────────── */
+  .header-dark {
+    background: var(--dark-900);
+    border-bottom: 1px solid var(--dark-border);
+  }
+
+  /* ── GOLD BAR ────────────────────────────────────────── */
+  .gold-bar {
+    height: 1px;
+    background: linear-gradient(90deg, var(--gold-primary), var(--gold-light), transparent);
+    border-radius: 9999px;
+  }
+
+  /* ── GRADIENT SIDEBAR ────────────────────────────────── */
+  .gradient-hpa {
+    background: var(--dark-900);
+  }
+  .gradient-gold {
+    background: linear-gradient(135deg, var(--gold-dark, #9C7B2E) 0%, var(--gold-primary) 60%, var(--gold-light) 100%);
+  }
+
+  /* ── CARDS ──────────────────────────────────────────── */
+  .card {
+    @apply bg-white rounded-xl shadow-card border border-hpa-slate-3 p-5;
+  }
+  .card-sm {
+    @apply bg-white rounded-xl shadow-card border border-hpa-slate-3 p-4;
+  }
+  .card-dark {
+    background: var(--dark-800);
+    border: 1px solid var(--dark-border);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+  }
+
+  /* ── BUTTONS ────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
+           transition-all duration-150 cursor-pointer select-none disabled:opacity-50
+           disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-1;
+  }
+  .btn-primary {
+    @apply btn bg-hpa-700 text-white hover:bg-hpa-600 focus:ring-hpa-700;
+  }
+  .btn-gold {
+    color: var(--dark-900);
+    background: var(--gold-primary);
+    @apply btn font-semibold;
+  }
+  .btn-gold:hover { background: var(--gold-light); }
+  .btn-ghost {
+    @apply btn bg-transparent text-hpa-slate-7 hover:bg-hpa-slate-2 focus:ring-hpa-slate-4;
+  }
+  .btn-danger {
+    @apply btn bg-hpa-red text-white hover:bg-red-700 focus:ring-hpa-red;
+  }
+  .btn-sm  { @apply px-3 py-1.5 text-xs rounded-lg; }
+  .btn-icon { @apply btn p-2 rounded-lg; }
+
+  /* ── INPUTS ─────────────────────────────────────────── */
+  .input {
+    @apply w-full px-3 py-2 rounded-lg border border-hpa-slate-3 bg-white
+           text-hpa-slate-9 text-sm placeholder-hpa-slate-5
+           focus:outline-none focus:ring-2 focus:ring-hpa-700 focus:border-transparent
+           transition-all duration-150;
+  }
+  .input-sm { @apply input py-1.5 text-xs; }
+  .label { @apply block text-xs font-medium text-hpa-slate-6 mb-1; }
+  .select { @apply input appearance-none cursor-pointer; }
+
+  /* ── BADGES ─────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-semibold uppercase tracking-wide;
+  }
+  .badge-green  { @apply badge bg-emerald-100 text-emerald-700; }
+  .badge-red    { @apply badge bg-red-100 text-red-700; }
+  .badge-amber  { @apply badge bg-amber-100 text-amber-700; }
+  .badge-blue   { @apply badge bg-blue-100 text-blue-700; }
+  .badge-gray   { @apply badge bg-hpa-slate-2 text-hpa-slate-6; }
+  .badge-gold   { @apply badge; background: var(--gold-dim); color: var(--gold-primary); }
+
+  /* ── TABLE ──────────────────────────────────────────── */
+  .table-wrapper { @apply w-full overflow-x-auto; }
+  .table { @apply w-full text-sm; }
+  .table th {
+    @apply px-4 py-3 text-left text-xs font-semibold text-hpa-slate-6
+           uppercase tracking-wide bg-hpa-slate-1 border-b border-hpa-slate-3;
+  }
+  .table td { @apply px-4 py-3 border-b border-hpa-slate-2 text-hpa-slate-8; }
+  .table tr:last-child td { @apply border-0; }
+  .table tr:hover td { @apply bg-hpa-slate-1; }
+
+  /* ── KPI CARD ───────────────────────────────────────── */
+  .kpi-card { @apply card flex items-start justify-between; }
+  .kpi-value { @apply text-2xl font-bold text-hpa-slate-9 font-mono; }
+  .kpi-label { @apply text-xs text-hpa-slate-5 font-medium uppercase tracking-wide mt-0.5; }
+  .kpi-change-up   { @apply text-xs font-semibold text-emerald-600; }
+  .kpi-change-down { @apply text-xs font-semibold text-red-500; }
+
+  /* ── MODAL ──────────────────────────────────────────── */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in;
+  }
+  .modal {
+    @apply bg-white rounded-2xl shadow-card-lg w-full max-w-lg max-h-[90vh] overflow-y-auto animate-slide-in;
+  }
+  .modal-header {
+    @apply flex items-center justify-between px-6 py-4 border-b border-hpa-slate-3;
+  }
+  .modal-body { @apply px-6 py-5; }
+  .modal-footer {
+    @apply flex justify-end gap-3 px-6 py-4 border-t border-hpa-slate-3 bg-hpa-slate-1 rounded-b-2xl;
+  }
+
+  /* ── FORM ───────────────────────────────────────────── */
+  .form-group { @apply space-y-1; }
+  .form-row { @apply grid grid-cols-2 gap-4; }
+  .form-section { @apply space-y-4 pb-5 border-b border-hpa-slate-2 last:border-0 last:pb-0; }
+  .form-section-title {
+    @apply text-xs font-semibold text-hpa-slate-6 uppercase tracking-wider mb-3;
+  }
+
+  /* ── TABS ───────────────────────────────────────────── */
+  .tabs { @apply flex gap-1 border-b border-hpa-slate-3; }
+  .tab {
+    @apply px-4 py-2.5 text-sm font-medium text-hpa-slate-5 cursor-pointer
+           border-b-2 border-transparent -mb-px transition-all duration-150 hover:text-hpa-slate-8;
+  }
+  .tab.active { @apply text-hpa-700 border-hpa-700; }
+
+  /* ── EMPTY STATE ────────────────────────────────────── */
+  .empty-state { @apply flex flex-col items-center justify-center py-16 text-center; }
+  .empty-state-icon { @apply w-12 h-12 text-hpa-slate-4 mb-3; }
+  .empty-state-title { @apply text-sm font-semibold text-hpa-slate-6 mb-1; }
+  .empty-state-desc { @apply text-xs text-hpa-slate-5 max-w-xs; }
+
+  /* ── STAT LINE ──────────────────────────────────────── */
+  .stat-row { @apply flex items-center justify-between py-2.5 border-b border-hpa-slate-2 last:border-0; }
+  .stat-label { @apply text-sm text-hpa-slate-6; }
+  .stat-value { @apply text-sm font-semibold text-hpa-slate-9; }
+
+  /* ── ALERTS ─────────────────────────────────────────── */
+  .alert { @apply flex items-start gap-3 p-4 rounded-xl border text-sm; }
+  .alert-info    { @apply alert bg-blue-50 border-blue-200 text-blue-800; }
+  .alert-success { @apply alert bg-emerald-50 border-emerald-200 text-emerald-800; }
+  .alert-warning { @apply alert bg-amber-50 border-amber-200 text-amber-800; }
+  .alert-error   { @apply alert bg-red-50 border-red-200 text-red-800; }
+
+  /* ── MOBILE RESPONSIVE HELPERS ──────────────────────── */
+  @media (max-width: 1023px) {
+    :root { --sidebar-width: 0px; }
+  }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+  .font-numeric { font-variant-numeric: tabular-nums; }
+  .gold-text { color: var(--gold-primary); }
+  .dark-bg   { background: var(--dark-900); }
+  .dark-border { border-color: var(--dark-border); }
 }
