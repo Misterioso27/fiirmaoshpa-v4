@@ -178,9 +178,14 @@ function Sidebar({ open, onClose }) {
             <div className="flex items-center gap-3">
               {/* Logo imagen o fallback */}
               <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden"
-                style={{ background: 'var(--gold-dim)', border: '1px solid var(--dark-border-hover)' }}>
-                <Building2 size={16} style={{ color: 'var(--gold-primary)' }} />
-              </div>
+  style={{ background: 'var(--dark-900)', border: '1px solid var(--dark-border-hover)' }}>
+  <img
+    src="https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Logo/a0000000-0000-4000-8000-000000000001/Gemini_Generated_Image_60043y60043y6004.png"
+    alt="FIIRMAOSHPA"
+    className="w-full h-full object-contain p-0.5"
+    onError={e => { e.target.style.display='none' }}
+  />
+</div>
               <div>
                 <p className="font-bold text-sm leading-tight" style={{ color: 'var(--gold-primary)' }}>
                   FIIRMAOSHPA
