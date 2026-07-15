@@ -94,7 +94,8 @@ const { data, error } = await supabase
         .order(sortCol === 'client_name' ? 'disbursed_at' : sortCol, { ascending: sortDir === 'asc' })
         .limit(1000)
 
-      if (!error) setAllLoans(data || [])
+      console.log('Loans data:', data?.length, 'Error:', error)
+if (!error) setAllLoans(data || [])
     } catch (e) { console.error(e) }
     setLoading(false)
   }, [companyId, sortCol, sortDir])
