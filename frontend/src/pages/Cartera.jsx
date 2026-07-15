@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { LayoutList, Download, Settings2, Search, RefreshCw, ChevronUp, ChevronDown, X } from 'lucide-react'
 import { supabase, fmtDate } from '@/lib/supabase'
 import { Spinner, Empty, Pagination } from '@/components/ui'
 import useAuthStore from '@/store/auth'
+
+const COMPANY_ID = 'a0000000-0000-4000-8000-000000000001'
 
 const ALL_COLUMNS = [
   { key: 'loan_code',        label: 'Código',           always: true  },
@@ -25,7 +27,6 @@ const ALL_COLUMNS = [
 ]
 
 const DEFAULT_COLS = ['loan_code','client_name','disbursed_at','principal','rate_monthly','term_months','frequency','payment_amount','total_amount','balance_total','days_overdue','status']
-
 const STATUS_LABELS = { active: 'ACTIVO', overdue: 'VENCIDO', paid: 'SALDADO', defaulted: 'DEFAULT', written_off: 'CASTIGADO' }
 const STATUS_COLORS = { active: 'badge-blue', overdue: 'badge-red', paid: 'badge-green', defaulted: 'badge-red', written_off: 'badge-gray' }
 const FREQ_LABELS   = { weekly: 'Semanal', biweekly: 'Quincenal', monthly: 'Mensual' }
@@ -37,44 +38,27 @@ function fmtMoney(v, curr = 'DOP') {
 
 export default function Cartera() {
   const { user } = useAuthStore()
-  const companyId = 'a0000000-0000-4000-8000-000000000001'
-
-  const [allLoans, setAllLoans]     = useState([])  // todos los datos cargados
-  const [loans, setLoans]           = useState([])  // datos filtrados para mostrar
-  const [loading, setLoading]       = useState(true)
-  const [page, setPage]             = useState(1)
-  const [search, setSearch]         = useState('')
-  const [status, setStatus]         = useState('')
-  const [sortCol, setSortCol]       = useState('disbursed_at')
-  const [sortDir, setSortDir]       = useState('desc')
-  const [showColPicker, setShowColPicker] = useState(false)
-  const [exporting, setExporting]   = useState(false)
-
-  const PAGE_SIZE = 25
   const storageKey = `hpa_cartera_cols_${user?.id || 'default'}`
+
+  const [allLoans, setAllLoans] = useState([])
+  const [loans, setLoans]       = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [page, setPage]         = useState(1)
+  const [search, setSearch]     = useState('')
+  const [status, setStatus]     = useState('')
+  const [sortCol, setSortCol]   = useState('disbursed_at')
+  const [sortDir, setSortDir]   = useState('desc')
+  const [showColPicker, setShowColPicker] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [activeCols, setActiveCols] = useState(() => {
     try { return JSON.parse(localStorage.getItem(storageKey)) || DEFAULT_COLS }
     catch { return DEFAULT_COLS }
   })
 
-  function toggleCol(key) {
-    const col = ALL_COLUMNS.find(c => c.key === key)
-    if (col?.always) return
-    const next = activeCols.includes(key)
-      ? activeCols.filter(c => c !== key)
-      : [...activeCols, key]
-    setActiveCols(next)
-    localStorage.setItem(storageKey, JSON.stringify(next))
-  }
+  const PAGE_SIZE = 25
 
-  function handleSort(key) {
-    if (sortCol === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortCol(key); setSortDir('asc') }
-  }
-
-  // ── Cargar TODOS los préstamos una sola vez ───────────────
-  const load = useCallback(async () => {
-    if (!companyId) return
+  // ── Cargar datos ──────────────────────────────────────────
+  async function load() {
     setLoading(true)
     try {
       const { data, error } = await supabase
@@ -87,32 +71,27 @@ export default function Cartera() {
           days_overdue, status, ai_analysis,
           clients ( first_name, last_name, phone_primary, client_code )
         `)
-        .eq('company_id', companyId)
-        .order(sortCol === 'client_name' ? 'disbursed_at' : sortCol, { ascending: sortDir === 'asc' })
+        .eq('company_id', COMPANY_ID)
+        .order('disbursed_at', { ascending: false })
         .limit(1000)
 
       if (error) {
-        alert('Error: ' + error.message)
+        console.error('Cartera error:', error)
       } else {
-        alert('Cargados: ' + (data?.length || 0))
         setAllLoans(data || [])
       }
     } catch (e) {
-      alert('Exception: ' + e.message)
+      console.error('Cartera exception:', e)
     }
     setLoading(false)
-  }, [companyId, sortCol, sortDir])
+  }
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [])
 
-  // ── Filtrar en el cliente ─────────────────────────────────
+  // ── Filtrar ───────────────────────────────────────────────
   useEffect(() => {
     let filtered = [...allLoans]
-
-    if (status) {
-      filtered = filtered.filter(l => l.status === status)
-    }
-
+    if (status) filtered = filtered.filter(l => l.status === status)
     if (search.trim()) {
       const s = search.toLowerCase().trim()
       filtered = filtered.filter(l =>
@@ -122,15 +101,25 @@ export default function Cartera() {
         l.clients?.phone_primary?.toLowerCase().includes(s)
       )
     }
-
     setLoans(filtered)
     setPage(1)
   }, [allLoans, search, status])
 
-  // Paginación local
-  const totalFiltered = loans.length
-  const totalPages    = Math.ceil(totalFiltered / PAGE_SIZE)
-  const pageLoans     = loans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  function toggleCol(key) {
+    const col = ALL_COLUMNS.find(c => c.key === key)
+    if (col?.always) return
+    const next = activeCols.includes(key)
+      ? activeCols.filter(c => c !== key)
+      : [...activeCols, key]
+    setActiveCols(next)
+    localStorage.setItem(storageKey, JSON.stringify(next))
+  }
+
+  function handleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+    load()
+  }
 
   // ── Exportar CSV ──────────────────────────────────────────
   async function exportCSV() {
@@ -138,7 +127,6 @@ export default function Cartera() {
     try {
       const visibleCols = ALL_COLUMNS.filter(c => activeCols.includes(c.key))
       const headers = visibleCols.map(c => c.label)
-
       const rows = loans.map(l => {
         const freq = l.ai_analysis?.frequency || 'monthly'
         const clientName = `${l.clients?.first_name || ''} ${l.clients?.last_name || ''}`.trim()
@@ -165,16 +153,11 @@ export default function Cartera() {
           }
         })
       })
-
-      const csv = [
-        headers.join(','),
-        ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
-      ].join('\n')
-
+      const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n')
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
       const url  = URL.createObjectURL(blob)
       const link = document.createElement('a')
-      link.href  = url
+      link.href = url
       link.download = `cartera-hpa-${new Date().toISOString().split('T')[0]}.csv`
       link.click()
       URL.revokeObjectURL(url)
@@ -183,6 +166,9 @@ export default function Cartera() {
   }
 
   const visibleCols = ALL_COLUMNS.filter(c => activeCols.includes(c.key))
+  const totalFiltered = loans.length
+  const totalPages    = Math.ceil(totalFiltered / PAGE_SIZE)
+  const pageLoans     = loans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   function renderCell(loan, colKey) {
     const freq = loan.ai_analysis?.frequency || 'monthly'
@@ -222,17 +208,14 @@ export default function Cartera() {
     }
   }
 
-  if (!user) return <div className="p-6 text-red-500">Sin sesión activa</div>
-
-return (
-  <div className="space-y-5 animate-fade-in">
-      {/* Header */}
+  return (
+    <div className="space-y-5 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-hpa-slate-9">Vista de Cartera</h2>
           <p className="text-xs text-hpa-slate-5 mt-0.5">
-            {totalFiltered} préstamos
-            {search && ` · Buscando "${search}"`}
+            {loading ? 'Cargando...' : `${totalFiltered} préstamos`}
+            {search && ` · "${search}"`}
             {status && ` · ${STATUS_LABELS[status] || status}`}
             {' · Columnas personalizables'}
           </p>
@@ -241,10 +224,8 @@ return (
           <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Actualizar
           </button>
-          <button
-            className={`btn btn-ghost btn-sm ${showColPicker ? 'bg-hpa-slate-2' : ''}`}
-            onClick={() => setShowColPicker(!showColPicker)}
-          >
+          <button className={`btn btn-ghost btn-sm ${showColPicker ? 'bg-hpa-slate-2' : ''}`}
+            onClick={() => setShowColPicker(!showColPicker)}>
             <Settings2 size={13} /> Columnas
           </button>
           <button className="btn btn-ghost btn-sm" onClick={exportCSV} disabled={exporting}>
@@ -253,7 +234,6 @@ return (
         </div>
       </div>
 
-      {/* Selector de columnas */}
       {showColPicker && (
         <div className="card p-4">
           <p className="text-xs font-semibold text-hpa-slate-7 mb-3">
@@ -276,21 +256,15 @@ return (
         </div>
       )}
 
-      {/* Filtros */}
       <div className="card p-4 flex gap-3 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-hpa-slate-4" />
-          <input
-            className="input pl-8 pr-8 text-sm"
+          <input className="input pl-8 pr-8 text-sm"
             placeholder="Buscar por nombre, código o teléfono..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+            value={search} onChange={e => setSearch(e.target.value)} />
           {search && (
-            <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-hpa-slate-4 hover:text-hpa-slate-7"
-              onClick={() => setSearch('')}
-            >
+            <button className="absolute right-2 top-1/2 -translate-y-1/2 text-hpa-slate-4 hover:text-hpa-slate-7"
+              onClick={() => setSearch('')}>
               <X size={13} />
             </button>
           )}
@@ -310,7 +284,6 @@ return (
         )}
       </div>
 
-      {/* Tabla */}
       <div className="card p-0 overflow-hidden">
         <div className="table-wrapper overflow-x-auto max-h-[600px] overflow-y-auto">
           <table className="table text-xs whitespace-nowrap">
