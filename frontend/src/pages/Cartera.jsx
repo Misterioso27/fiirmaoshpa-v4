@@ -77,9 +77,12 @@ export default function Cartera() {
     if (!companyId) return
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('loans')
-        .select(`
+      const { data: { session } } = await supabase.auth.getSession()
+console.log('Session:', session?.user?.id)
+
+const { data, error } = await supabase
+  .from('loans')
+  .select(`
           id, loan_code, type, currency, principal, approved_amount,
           rate_monthly, term_months, payment_amount, total_interest,
           total_amount, balance_total, balance_principal,
