@@ -1,27 +1,27 @@
 import { useState, useEffect, useCallback } from 'react'
-import { LayoutList, Download, Settings2, Search, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { LayoutList, Download, Settings2, Search, RefreshCw, ChevronUp, ChevronDown, X } from 'lucide-react'
 import { supabase, fmtDate } from '@/lib/supabase'
 import { Spinner, Empty, Pagination } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
 const ALL_COLUMNS = [
-  { key: 'loan_code',        label: 'Código',          always: true  },
-  { key: 'client_name',      label: 'Cliente',         always: true  },
-  { key: 'client_phone',     label: 'Teléfono',        always: false },
-  { key: 'disbursed_at',     label: 'Fecha Desembolso',always: false },
-  { key: 'currency',         label: 'Moneda',          always: false },
-  { key: 'principal',        label: 'Monto Prestado',  always: false },
-  { key: 'approved_amount',  label: 'Monto Aprobado',  always: false },
-  { key: 'rate_monthly',     label: 'Tasa Mensual',    always: false },
-  { key: 'term_months',      label: 'Plazo',           always: false },
-  { key: 'frequency',        label: 'Frecuencia',      always: false },
-  { key: 'payment_amount',   label: 'Cuota',           always: false },
-  { key: 'total_interest',   label: 'Interés Total',   always: false },
-  { key: 'total_amount',     label: 'Cap. + Interés',  always: false },
-  { key: 'balance_total',    label: 'Saldo Restante',  always: false },
-  { key: 'next_payment_date',label: 'Próximo Pago',    always: false },
-  { key: 'days_overdue',     label: 'Días Mora',       always: false },
-  { key: 'status',           label: 'Estado',          always: true  },
+  { key: 'loan_code',        label: 'Código',           always: true  },
+  { key: 'client_name',      label: 'Cliente',          always: true  },
+  { key: 'client_phone',     label: 'Teléfono',         always: false },
+  { key: 'disbursed_at',     label: 'Fecha Desembolso', always: false },
+  { key: 'currency',         label: 'Moneda',           always: false },
+  { key: 'principal',        label: 'Monto Prestado',   always: false },
+  { key: 'approved_amount',  label: 'Monto Aprobado',   always: false },
+  { key: 'rate_monthly',     label: 'Tasa Mensual',     always: false },
+  { key: 'term_months',      label: 'Plazo',            always: false },
+  { key: 'frequency',        label: 'Frecuencia',       always: false },
+  { key: 'payment_amount',   label: 'Cuota',            always: false },
+  { key: 'total_interest',   label: 'Interés Total',    always: false },
+  { key: 'total_amount',     label: 'Cap. + Interés',   always: false },
+  { key: 'balance_total',    label: 'Saldo Restante',   always: false },
+  { key: 'next_payment_date',label: 'Próximo Pago',     always: false },
+  { key: 'days_overdue',     label: 'Días Mora',        always: false },
+  { key: 'status',           label: 'Estado',           always: true  },
 ]
 
 const DEFAULT_COLS = ['loan_code','client_name','disbursed_at','principal','rate_monthly','term_months','frequency','payment_amount','total_amount','balance_total','days_overdue','status']
@@ -39,10 +39,10 @@ export default function Cartera() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
 
-  const [loans, setLoans]           = useState([])
+  const [allLoans, setAllLoans]     = useState([])  // todos los datos cargados
+  const [loans, setLoans]           = useState([])  // datos filtrados para mostrar
   const [loading, setLoading]       = useState(true)
   const [page, setPage]             = useState(1)
-  const [pagination, setPagination] = useState({})
   const [search, setSearch]         = useState('')
   const [status, setStatus]         = useState('')
   const [sortCol, setSortCol]       = useState('disbursed_at')
@@ -50,7 +50,7 @@ export default function Cartera() {
   const [showColPicker, setShowColPicker] = useState(false)
   const [exporting, setExporting]   = useState(false)
 
-  // Columnas activas — persistidas en localStorage por usuario
+  const PAGE_SIZE = 25
   const storageKey = `hpa_cartera_cols_${user?.id || 'default'}`
   const [activeCols, setActiveCols] = useState(() => {
     try { return JSON.parse(localStorage.getItem(storageKey)) || DEFAULT_COLS }
@@ -72,11 +72,12 @@ export default function Cartera() {
     else { setSortCol(key); setSortDir('asc') }
   }
 
+  // ── Cargar TODOS los préstamos una sola vez ───────────────
   const load = useCallback(async () => {
     if (!companyId) return
     setLoading(true)
     try {
-      let query = supabase
+      const { data, error } = await supabase
         .from('loans')
         .select(`
           id, loan_code, type, currency, principal, approved_amount,
@@ -85,57 +86,53 @@ export default function Cartera() {
           disbursed_at, first_payment_date, next_payment_date,
           days_overdue, status, ai_analysis,
           clients ( first_name, last_name, phone_primary, client_code )
-        `, { count: 'exact' })
+        `)
         .eq('company_id', companyId)
         .order(sortCol === 'client_name' ? 'disbursed_at' : sortCol, { ascending: sortDir === 'asc' })
-        .range((page - 1) * 25, page * 25 - 1)
+        .limit(1000)
 
-      if (status) query = query.eq('status', status)
-      if (search) query = query.or(
-        `loan_code.ilike.%${search}%`
-      )
-
-      const { data, error, count } = await query
-      if (!error) {
-        let filtered = data || []
-        if (search) {
-          const s = search.toLowerCase()
-          filtered = filtered.filter(l =>
-            l.loan_code?.toLowerCase().includes(s) ||
-            `${l.clients?.first_name} ${l.clients?.last_name}`.toLowerCase().includes(s)
-          )
-        }
-        setLoans(filtered)
-        setPagination({ total: count || 0, pages: Math.ceil((count || 0) / 25) })
-      }
+      if (!error) setAllLoans(data || [])
     } catch (e) { console.error(e) }
     setLoading(false)
-  }, [companyId, page, status, sortCol, sortDir, search])
+  }, [companyId, sortCol, sortDir])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setPage(1) }, [search, status])
+
+  // ── Filtrar en el cliente ─────────────────────────────────
+  useEffect(() => {
+    let filtered = [...allLoans]
+
+    if (status) {
+      filtered = filtered.filter(l => l.status === status)
+    }
+
+    if (search.trim()) {
+      const s = search.toLowerCase().trim()
+      filtered = filtered.filter(l =>
+        l.loan_code?.toLowerCase().includes(s) ||
+        `${l.clients?.first_name || ''} ${l.clients?.last_name || ''}`.toLowerCase().includes(s) ||
+        l.clients?.client_code?.toLowerCase().includes(s) ||
+        l.clients?.phone_primary?.toLowerCase().includes(s)
+      )
+    }
+
+    setLoans(filtered)
+    setPage(1)
+  }, [allLoans, search, status])
+
+  // Paginación local
+  const totalFiltered = loans.length
+  const totalPages    = Math.ceil(totalFiltered / PAGE_SIZE)
+  const pageLoans     = loans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   // ── Exportar CSV ──────────────────────────────────────────
   async function exportCSV() {
     setExporting(true)
     try {
-      const { data } = await supabase
-        .from('loans')
-        .select(`
-          loan_code, currency, principal, approved_amount, rate_monthly,
-          term_months, payment_amount, total_interest, total_amount,
-          balance_total, disbursed_at, next_payment_date, days_overdue,
-          status, ai_analysis,
-          clients ( first_name, last_name, phone_primary )
-        `)
-        .eq('company_id', companyId)
-        .order('disbursed_at', { ascending: false })
-        .limit(5000)
-
       const visibleCols = ALL_COLUMNS.filter(c => activeCols.includes(c.key))
       const headers = visibleCols.map(c => c.label)
 
-      const rows = (data || []).map(l => {
+      const rows = loans.map(l => {
         const freq = l.ai_analysis?.frequency || 'monthly'
         const clientName = `${l.clients?.first_name || ''} ${l.clients?.last_name || ''}`.trim()
         return visibleCols.map(c => {
@@ -184,36 +181,36 @@ export default function Cartera() {
     const freq = loan.ai_analysis?.frequency || 'monthly'
     const curr = loan.currency || 'DOP'
     switch (colKey) {
-      case 'loan_code':         return <span className="font-mono text-xs font-semibold text-hpa-700">{loan.loan_code}</span>
-      case 'client_name':       return (
+      case 'loan_code':        return <span className="font-mono text-xs font-semibold text-hpa-700">{loan.loan_code}</span>
+      case 'client_name':      return (
         <div>
           <p className="font-semibold text-sm">{loan.clients?.first_name} {loan.clients?.last_name}</p>
           <p className="text-2xs text-hpa-slate-5">{loan.clients?.client_code}</p>
         </div>
       )
-      case 'client_phone':      return <span className="text-xs">{loan.clients?.phone_primary || '—'}</span>
-      case 'disbursed_at':      return <span className="text-xs text-hpa-slate-5">{fmtDate(loan.disbursed_at)}</span>
-      case 'currency':          return <span className="badge badge-blue">{loan.currency}</span>
-      case 'principal':         return <span className="font-numeric font-semibold text-sm">{fmtMoney(loan.principal, curr)}</span>
-      case 'approved_amount':   return <span className="font-numeric text-sm">{fmtMoney(loan.approved_amount || loan.principal, curr)}</span>
-      case 'rate_monthly':      return <span className="font-semibold text-hpa-700">{loan.rate_monthly}%</span>
-      case 'term_months':       return <span className="text-xs text-hpa-slate-6">{loan.term_months}m</span>
-      case 'frequency':         return <span className="text-xs">{FREQ_LABELS[freq] || freq}</span>
-      case 'payment_amount':    return <span className="font-numeric text-sm">{fmtMoney(loan.payment_amount, curr)}</span>
-      case 'total_interest':    return <span className="font-numeric text-amber-600">{fmtMoney(loan.total_interest, curr)}</span>
-      case 'total_amount':      return <span className="font-numeric font-semibold">{fmtMoney(loan.total_amount, curr)}</span>
-      case 'balance_total':     return (
+      case 'client_phone':     return <span className="text-xs">{loan.clients?.phone_primary || '—'}</span>
+      case 'disbursed_at':     return <span className="text-xs text-hpa-slate-5">{fmtDate(loan.disbursed_at)}</span>
+      case 'currency':         return <span className="badge badge-blue">{loan.currency}</span>
+      case 'principal':        return <span className="font-numeric font-semibold text-sm">{fmtMoney(loan.principal, curr)}</span>
+      case 'approved_amount':  return <span className="font-numeric text-sm">{fmtMoney(loan.approved_amount || loan.principal, curr)}</span>
+      case 'rate_monthly':     return <span className="font-semibold text-hpa-700">{loan.rate_monthly}%</span>
+      case 'term_months':      return <span className="text-xs text-hpa-slate-6">{loan.term_months}m</span>
+      case 'frequency':        return <span className="text-xs">{FREQ_LABELS[freq] || freq}</span>
+      case 'payment_amount':   return <span className="font-numeric text-sm">{fmtMoney(loan.payment_amount, curr)}</span>
+      case 'total_interest':   return <span className="font-numeric text-amber-600">{fmtMoney(loan.total_interest, curr)}</span>
+      case 'total_amount':     return <span className="font-numeric font-semibold">{fmtMoney(loan.total_amount, curr)}</span>
+      case 'balance_total':    return (
         <span className={`font-numeric font-semibold ${parseFloat(loan.balance_total) > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
           {fmtMoney(loan.balance_total, curr)}
         </span>
       )
       case 'next_payment_date': return <span className="text-xs text-hpa-slate-5">{loan.next_payment_date ? fmtDate(loan.next_payment_date) : '—'}</span>
-      case 'days_overdue':      return (
+      case 'days_overdue':     return (
         <span className={`font-semibold text-xs ${loan.days_overdue > 0 ? 'text-red-600' : 'text-hpa-slate-5'}`}>
           {loan.days_overdue > 0 ? `${loan.days_overdue}d` : '—'}
         </span>
       )
-      case 'status':            return <span className={`badge ${STATUS_COLORS[loan.status] || 'badge-gray'}`}>{STATUS_LABELS[loan.status] || loan.status}</span>
+      case 'status':           return <span className={`badge ${STATUS_COLORS[loan.status] || 'badge-gray'}`}>{STATUS_LABELS[loan.status] || loan.status}</span>
       default: return '—'
     }
   }
@@ -225,12 +222,15 @@ export default function Cartera() {
         <div>
           <h2 className="text-xl font-bold text-hpa-slate-9">Vista de Cartera</h2>
           <p className="text-xs text-hpa-slate-5 mt-0.5">
-            {pagination.total || 0} préstamos · Columnas personalizables
+            {totalFiltered} préstamos
+            {search && ` · Buscando "${search}"`}
+            {status && ` · ${STATUS_LABELS[status] || status}`}
+            {' · Columnas personalizables'}
           </p>
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-ghost btn-sm" onClick={load}>
-            <RefreshCw size={13} /> Actualizar
+          <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Actualizar
           </button>
           <button
             className={`btn btn-ghost btn-sm ${showColPicker ? 'bg-hpa-slate-2' : ''}`}
@@ -248,36 +248,43 @@ export default function Cartera() {
       {showColPicker && (
         <div className="card p-4">
           <p className="text-xs font-semibold text-hpa-slate-7 mb-3">
-            Selecciona las columnas que quieres ver — se guardan automáticamente para tu usuario
+            Selecciona las columnas — se guardan automáticamente para tu usuario
           </p>
           <div className="flex flex-wrap gap-2">
             {ALL_COLUMNS.map(col => (
-              <button
-                key={col.key}
-                type="button"
-                disabled={col.always}
+              <button key={col.key} type="button" disabled={col.always}
                 onClick={() => toggleCol(col.key)}
                 className={`px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all ${
                   activeCols.includes(col.key)
                     ? 'border-hpa-700 bg-hpa-700/10 text-hpa-700'
                     : 'border-hpa-slate-2 text-hpa-slate-5 hover:border-hpa-slate-3'
-                } ${col.always ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                {col.label}
-                {col.always && ' 🔒'}
+                } ${col.always ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                {col.label}{col.always && ' 🔒'}
               </button>
             ))}
           </div>
-          <p className="text-2xs text-hpa-slate-4 mt-3">🔒 = columna fija, no se puede ocultar</p>
+          <p className="text-2xs text-hpa-slate-4 mt-3">🔒 = columna fija</p>
         </div>
       )}
 
       {/* Filtros */}
-      <div className="card p-4 flex gap-3 flex-wrap items-end">
-        <div className="relative flex-1 min-w-40">
-          <Search size={13} className="absolute left-3 top-2.5 text-hpa-slate-4" />
-          <input className="input pl-8 text-sm" placeholder="Buscar cliente o código..."
-            value={search} onChange={e => setSearch(e.target.value)} />
+      <div className="card p-4 flex gap-3 flex-wrap items-center">
+        <div className="relative flex-1 min-w-48">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-hpa-slate-4" />
+          <input
+            className="input pl-8 pr-8 text-sm"
+            placeholder="Buscar por nombre, código o teléfono..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-hpa-slate-4 hover:text-hpa-slate-7"
+              onClick={() => setSearch('')}
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
         <select className="select w-44" value={status} onChange={e => setStatus(e.target.value)}>
           <option value="">Todos los estados</option>
@@ -286,6 +293,12 @@ export default function Cartera() {
           <option value="paid">Saldados</option>
           <option value="defaulted">Default</option>
         </select>
+        {(search || status) && (
+          <button className="btn btn-ghost btn-sm text-hpa-slate-5"
+            onClick={() => { setSearch(''); setStatus('') }}>
+            <X size={13} /> Limpiar
+          </button>
+        )}
       </div>
 
       {/* Tabla */}
@@ -295,11 +308,9 @@ export default function Cartera() {
             <thead className="sticky top-0 z-10">
               <tr>
                 {visibleCols.map(col => (
-                  <th
-                    key={col.key}
+                  <th key={col.key}
                     className="cursor-pointer select-none hover:bg-hpa-slate-2 transition-colors"
-                    onClick={() => handleSort(col.key)}
-                  >
+                    onClick={() => handleSort(col.key)}>
                     <div className="flex items-center gap-1">
                       {col.label}
                       {sortCol === col.key && (
@@ -314,12 +325,16 @@ export default function Cartera() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={visibleCols.length} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
-              ) : loans.length === 0 ? (
-                <tr><td colSpan={visibleCols.length}>
-                  <Empty icon={LayoutList} title="Sin préstamos" desc="No se encontraron registros con los filtros seleccionados" />
+                <tr><td colSpan={visibleCols.length} className="py-12 text-center">
+                  <Spinner size={20} className="mx-auto" />
                 </td></tr>
-              ) : loans.map(loan => (
+              ) : pageLoans.length === 0 ? (
+                <tr><td colSpan={visibleCols.length}>
+                  <Empty icon={LayoutList}
+                    title={search ? `Sin resultados para "${search}"` : 'Sin préstamos'}
+                    desc={search ? 'Intenta con otro nombre o código' : 'No se encontraron registros'} />
+                </td></tr>
+              ) : pageLoans.map(loan => (
                 <tr key={loan.id} className="hover:bg-hpa-slate-1">
                   {visibleCols.map(col => (
                     <td key={col.key}>{renderCell(loan, col.key)}</td>
@@ -329,7 +344,7 @@ export default function Cartera() {
             </tbody>
           </table>
         </div>
-        <Pagination page={page} pages={pagination.pages} total={pagination.total} limit={25} onChange={setPage} />
+        <Pagination page={page} pages={totalPages} total={totalFiltered} limit={PAGE_SIZE} onChange={setPage} />
       </div>
     </div>
   )
