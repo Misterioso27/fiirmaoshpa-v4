@@ -219,8 +219,10 @@ if (!error) setAllLoans(data || [])
     }
   }
 
-  return (
-    <div className="space-y-5 animate-fade-in">
+  if (!user) return <div className="p-6 text-red-500">Sin sesión activa</div>
+
+return (
+  <div className="space-y-5 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
