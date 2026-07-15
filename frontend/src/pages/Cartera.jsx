@@ -37,7 +37,7 @@ function fmtMoney(v, curr = 'DOP') {
 
 export default function Cartera() {
   const { user } = useAuthStore()
-  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+  const companyId = 'a0000000-0000-4000-8000-000000000001'
 
   const [allLoans, setAllLoans]     = useState([])  // todos los datos cargados
   const [loans, setLoans]           = useState([])  // datos filtrados para mostrar
