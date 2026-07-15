@@ -77,12 +77,9 @@ export default function Cartera() {
     if (!companyId) return
     setLoading(true)
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-console.log('Session:', session?.user?.id)
-
-const { data, error } = await supabase
-  .from('loans')
-  .select(`
+      const { data, error } = await supabase
+        .from('loans')
+        .select(`
           id, loan_code, type, currency, principal, approved_amount,
           rate_monthly, term_months, payment_amount, total_interest,
           total_amount, balance_total, balance_principal,
@@ -94,9 +91,15 @@ const { data, error } = await supabase
         .order(sortCol === 'client_name' ? 'disbursed_at' : sortCol, { ascending: sortDir === 'asc' })
         .limit(1000)
 
-      console.log('Loans data:', data?.length, 'Error:', error)
-if (!error) setAllLoans(data || [])
-    } catch (e) { console.error(e) }
+      if (error) {
+        alert('Error: ' + error.message)
+      } else {
+        alert('Cargados: ' + (data?.length || 0))
+        setAllLoans(data || [])
+      }
+    } catch (e) {
+      alert('Exception: ' + e.message)
+    }
     setLoading(false)
   }, [companyId, sortCol, sortDir])
 
