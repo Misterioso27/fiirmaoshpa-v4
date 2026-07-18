@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react'
 import { LayoutList, Download, Settings2, Search, RefreshCw, ChevronUp, ChevronDown, X } from 'lucide-react'
-import { supabase, fmtDate } from '@/lib/supabase'
-import { Spinner, Empty, Pagination } from '@/components/ui'
+import { supabase, fmtDate } from '@/lib/supabase'import { createClient } from '@supabase/supabase-js'
+import { fmtDate } from '@/lib/supabase'
+
+const supabase = createClient(
+  'https://ylodmopafxauvwurfweh.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb2Rtb3BhZnhhdXZ3dXJmd2VoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5MTM3NDMsImV4cCI6MjA5NjQ4OTc0M30.QlfDUGbn_O7EjRbbyuEPQVWiNxwLN0EZelV0uxPO7JA'
+)import { Spinner, Empty, Pagination } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
 const COMPANY_ID = 'a0000000-0000-4000-8000-000000000001'
