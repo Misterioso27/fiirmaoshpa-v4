@@ -233,6 +233,7 @@ async function parseExcel(file, onSheetProgress) {
             monto_original: monto, interes_total: interes,
             cuotas_pactadas: Math.round(cuotas) || 1,
             frecuencia: metodoRaw.includes('SEMANA') ? 'weekly' : metodoRaw.includes('MES') ? 'monthly' : 'biweekly',
+            telefono: colMap.phone !== undefined && row[colMap.phone] ? String(row[colMap.phone]).trim() : '',
             movimientos: [],
           }
         }
@@ -267,6 +268,7 @@ async function parseExcel(file, onSheetProgress) {
           monto_original: monto, interes_total: interes,
           cuotas_pactadas: Math.round(cuotas) || 1,
           frecuencia: metodoRaw.includes('SEMANA') ? 'weekly' : metodoRaw.includes('MES') ? 'monthly' : 'biweekly',
+          telefono: colMap.phone !== undefined && row[colMap.phone] ? String(row[colMap.phone]).trim() : '',
           movimientos: [{ fecha, cap_interes: totalPactado, pago: 0, estatus: statusTxt, obs: '' }],
         })
       }
@@ -342,6 +344,7 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
           client_code: `HPA-C-${String((count || 0) + 1).padStart(4, '0')}`,
           type: 'person', status: 'active',
           first_name: loan.first_name, last_name: loan.last_name,
+          phone_primary: loan.telefono || 'N/A',
           nationality: 'DO', kyc_level: 1,
           risk_level: 'medium', assigned_to: userId, created_by: userId,
         }).select('id').single()
