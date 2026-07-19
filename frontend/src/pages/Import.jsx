@@ -38,11 +38,30 @@ function xlDate(serial) {
   } catch { return null }
 }
 
-// Hojas que nunca son histórico de préstamos — se descartan automáticamente
-const DISCARD_KEYWORDS = ['DASHBOAR', 'CALCULADORA', 'GASTOS', 'COBRO', 'TAX DE CAMBIO', 'TAXA DE CAMBIO', 'RECOLOCAR', 'PLANILHA', 'AMORTIZACION', 'AMORTIZAÇÃO']
+// Hojas que nunca contienen registros de clientes (herramientas internas, no datos)
+const DISCARD_KEYWORDS = ['CALCULADORA', 'TAX DE CAMBIO', 'TAXA DE CAMBIO', 'AMORTIZACION', 'AMORTIZAÇÃO', 'DASHBOAR']
 
-// Pistas de encabezado que identifican una hoja de préstamos
-const LOAN_HEADER_HINTS = ['IDC', 'FECHA', 'NOMBRE', 'MONTO PRESTADO', 'CAPI']
+// Sinónimos por categoría — el parser reconoce cualquier variante de nombre de columna,
+// sin exigir un formato único. "includes" hace que también funcione con encabezados largos
+// (ej. formularios de Google con el texto completo de la pregunta).
+const SYNONYMS = {
+  name:     ['NOMBRE COMPLETO', 'NOMBRE', 'NOMBRES', 'CLIENTE', 'CLIENTES', 'SOLICITANTE'],
+  amount:   ['MONTO SOLICITADO', 'MONTO PRESTADO', 'MONTO APROBADO', 'MONTO A SOLICITAR', 'MONTO', 'CAPITAL', 'ENVERSION', 'INVERSION', 'VALOR', 'PRINCIPAL'],
+  date:     ['FECHA DESEMBOLSO', 'FECHA DE INICIO', 'DATA DE INICIO', 'FECHA DE LA SOLICITUD', 'FECHA EMISION', 'FECHA_EMISION', 'FECHA', 'DATA'],
+  end_date: ['FECHA DE VENCIMIENTO', 'FECHA VENCIMIENTO', 'FECHA_VENCIMIENTO', 'VENCIMIENTO'],
+  rate:     ['TASA DE INTERES', 'TASA', 'INTERES', 'INTERÉS'],
+  installments: ['CUOTAS A PAGAR', 'CUOTAS', 'PLAZO'],
+  method:   ['FORMA DE PAGO', 'METODO DE PAGO', 'METODO', 'FRECUENCIA'],
+  total:    ['TOTAL PAGO', 'TOTAL A PAGAR', 'CAP & INT', 'CAP/INTERES', 'CAPI/INTERES', 'TOTAL'],
+  status:   ['ESTATUS', 'ESTADO', 'STATUS'],
+  phone:    ['CELULAR', 'TELEFONO', 'WHATSAPP'],
+  idc:      ['IDC'],
+}
+// Orden de prioridad al asignar una columna a una categoría (una columna no se reparte entre dos)
+const CATEGORY_ORDER = ['idc', 'name', 'amount', 'date', 'end_date', 'rate', 'installments', 'method', 'total', 'status', 'phone']
+
+// Palabras que, si aparecen en el nombre de la hoja o en sus encabezados, marcan el registro como inversión/certificado
+const INVESTMENT_HINTS = ['SOCIO', 'ENVERSION', 'INVERSION', 'CERTIFICAD', 'ACCIONISTA']
 
 function colLetterToIndex(ref) {
   const letters = ref.replace(/[0-9]/g, '')
@@ -51,7 +70,24 @@ function colLetterToIndex(ref) {
   return n - 1
 }
 
-// ─── Parser principal: multi-hoja, detecta tipo, reconstruye cronología ────
+function parseDateValue(v) {
+  if (v === null || v === undefined) return null
+  if (isNumeric(v)) return xlDate(v)
+  const s = String(v).trim()
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/)
+  return m ? m[1] : null
+}
+
+function looksLikeName(v) {
+  if (!v) return false
+  const s = String(v).trim()
+  if (s.length < 3 || isNumeric(s)) return false
+  // descarta encabezados repetidos o basura ("·", "NA", "SI", "N/A")
+  if (/^(NA|N\/A|SI|NO|·)$/i.test(s)) return false
+  return /[a-zA-ZÀ-ÿ]/.test(s)
+}
+
+// ─── Parser principal: multi-hoja, sinónimos amplios, nunca declara "no reconocido" ────
 async function parseExcel(file, onSheetProgress) {
   const arrayBuffer = await file.arrayBuffer()
   const uint8 = new Uint8Array(arrayBuffer)
@@ -68,7 +104,6 @@ async function parseExcel(file, onSheetProgress) {
   const zip    = await window.JSZip.loadAsync(arrayBuffer)
   const parser = new DOMParser()
 
-  // shared strings
   const strings = []
   const ssFile = zip.file('xl/sharedStrings.xml')
   if (ssFile) {
@@ -79,8 +114,7 @@ async function parseExcel(file, onSheetProgress) {
     })
   }
 
-  // nombres reales de las hojas (xl/workbook.xml + relaciones)
-  const sheetNames = {} // sheetN.xml -> nombre visible
+  const sheetNames = {}
   const wbFile = zip.file('xl/workbook.xml')
   const relsFile = zip.file('xl/_rels/workbook.xml.rels')
   if (wbFile && relsFile) {
@@ -103,8 +137,8 @@ async function parseExcel(file, onSheetProgress) {
   }
 
   const sheetFiles = Object.keys(zip.files).filter(n => n.match(/xl\/worksheets\/sheet\d+\.xml/))
-  const allLoans = []
-  const sheetsReport = { discarded: [], noHeader: [], processed: [] }
+  const allRecords = []
+  const sheetsReport = { discarded: [], empty: [], processed: [] }
 
   for (const sheetPath of sheetFiles) {
     const sheetName = sheetNames[sheetPath] || sheetPath
@@ -121,8 +155,8 @@ async function parseExcel(file, onSheetProgress) {
     const sheetXml = await sheetFile.async('text')
     const sheetDoc = parser.parseFromString(sheetXml, 'application/xml')
     const rowEls   = Array.from(sheetDoc.querySelectorAll('row'))
+    if (!rowEls.length) { sheetsReport.empty.push(sheetName); continue }
 
-    // extraer valores de una fila respetando la columna real (evita desalineación por celdas vacías)
     function rowValues(rowEl) {
       const cellMap = {}
       Array.from(rowEl.querySelectorAll('c')).forEach(c => {
@@ -142,100 +176,119 @@ async function parseExcel(file, onSheetProgress) {
       return vals
     }
 
-    // localizar fila de encabezado real (dentro de las primeras 5 filas)
+    // buscar la mejor fila de encabezado entre las primeras 15 filas (sinónimos amplios)
     let headerRowIdx = -1
     let colMap = {}
-    for (let i = 0; i < Math.min(5, rowEls.length); i++) {
+    let bestScore = 0
+    for (let i = 0; i < Math.min(15, rowEls.length); i++) {
       const vals = rowValues(rowEls[i]).map(v => (v ? String(v).toUpperCase().trim() : ''))
-      const hits = LOAN_HEADER_HINTS.filter(hint => vals.some(c => c.includes(hint))).length
-      if (hits >= 3) {
-        headerRowIdx = i
-        vals.forEach((c, j) => {
-          if (c.includes('IDC') && colMap.idc === undefined) colMap.idc = j
-          else if (c.includes('FECHA') && colMap.fecha === undefined) colMap.fecha = j
-          else if (c.startsWith('NOMBRE') && colMap.nombre === undefined) colMap.nombre = j
-          else if (c.includes('METODO') && colMap.metodo === undefined) colMap.metodo = j
-          else if (c === 'CUOTAS' && colMap.cuotas === undefined) colMap.cuotas = j
-          else if (c.includes('MONTO PRESTADO') && colMap.monto === undefined) colMap.monto = j
-          else if (c === 'INTERES' && colMap.interes === undefined) colMap.interes = j
-          else if (c.includes('CAPI') && c.includes('INTERES') && colMap.capinteres === undefined) colMap.capinteres = j
-          else if (c.includes('MULTA') && colMap.multa === undefined) colMap.multa = j
-          else if (c === 'PAGOS' && colMap.pagos === undefined) colMap.pagos = j
-          else if ((c.includes('ESTATUS') || c === 'STATUS') && colMap.estatus === undefined) colMap.estatus = j
-          else if (c.includes('OBSERVA') && colMap.obs === undefined) colMap.obs = j
-        })
-        break
+      const trialMap = {}
+      vals.forEach((cellText, j) => {
+        // celdas muy largas son párrafos/instrucciones, no encabezados de columna — se ignoran
+        if (!cellText || cellText.length > 60) return
+        for (const cat of CATEGORY_ORDER) {
+          if (trialMap[cat] !== undefined) continue
+          if (SYNONYMS[cat].some(kw => cellText.includes(kw))) { trialMap[cat] = j; break }
+        }
+      })
+      const score = (trialMap.name !== undefined ? 2 : 0) + (trialMap.amount !== undefined ? 2 : 0) + (trialMap.date !== undefined ? 1 : 0) + (trialMap.idc !== undefined ? 1 : 0)
+      if (trialMap.name !== undefined && score > bestScore) {
+        bestScore = score; headerRowIdx = i; colMap = trialMap
       }
     }
 
-    if (headerRowIdx === -1) {
-      sheetsReport.noHeader.push(sheetName)
+    if (headerRowIdx === -1 || colMap.name === undefined) {
+      sheetsReport.empty.push(sheetName)
       continue
     }
 
-    // agrupar filas por préstamo (fila con IDC + nombre válido abre uno nuevo)
-    const loansInSheet = []
+    const isInvestmentSheet = INVESTMENT_HINTS.some(k => upperName.includes(k))
+    const useGroupedMode = colMap.idc !== undefined
+
+    const recordsInSheet = []
     let current = null
 
     for (let i = headerRowIdx + 1; i < rowEls.length; i++) {
       const row = rowValues(rowEls[i])
+      const nameVal   = colMap.name !== undefined ? row[colMap.name] : null
+      const amountVal = colMap.amount !== undefined ? row[colMap.amount] : null
+      const dateVal   = colMap.date !== undefined ? row[colMap.date] : null
       const idcVal    = colMap.idc !== undefined ? row[colMap.idc] : null
-      const nombreVal = colMap.nombre !== undefined ? row[colMap.nombre] : null
-      const fechaVal  = colMap.fecha !== undefined ? row[colMap.fecha] : null
 
-      const idcStr    = idcVal ? String(idcVal).trim() : ''
-      const nombreStr = nombreVal && !isNumeric(nombreVal) ? cleanName(nombreVal) : ''
-      const isNewLoanRow = idcStr && idcStr !== 'IDC' && idcStr !== '·' && nombreStr && nombreStr.length >= 3
+      if (useGroupedMode) {
+        // modo agrupado: una fila con IDC + nombre abre un préstamo, las siguientes son su historial
+        const idcStr = idcVal ? String(idcVal).trim() : ''
+        const nombreStr = looksLikeName(nameVal) ? cleanName(nameVal) : ''
+        const isNewLoanRow = idcStr && idcStr !== '·' && nombreStr
 
-      if (isNewLoanRow) {
-        if (current && current.movimientos.length > 0) loansInSheet.push(current)
-        const monto   = colMap.monto !== undefined ? safeFloat(row[colMap.monto]) : 0
-        const interes = colMap.interes !== undefined ? safeFloat(row[colMap.interes]) : 0
-        const cuotas  = colMap.cuotas !== undefined ? safeFloat(row[colMap.cuotas]) : 0
-        const metodoRaw = colMap.metodo !== undefined && row[colMap.metodo] ? String(row[colMap.metodo]).trim().toUpperCase() : 'QUINCENAL'
-        const freqMap = { QUICENAL: 'biweekly', QUINCENAL: 'biweekly', SEMANAL: 'weekly', MENSUAL: 'monthly' }
-        current = {
-          idc: idcStr,
-          cliente: nombreStr,
-          hoja_origen: sheetName,
-          fecha_desembolso: fechaVal && isNumeric(fechaVal) ? xlDate(fechaVal) : null,
-          monto_original: monto,
-          interes_total: interes,
-          cuotas_pactadas: Math.round(cuotas) || 1,
-          frecuencia: freqMap[metodoRaw] || 'biweekly',
-          movimientos: [],
+        if (isNewLoanRow) {
+          if (current && current.movimientos.length > 0) recordsInSheet.push(current)
+          const monto   = colMap.amount !== undefined ? safeFloat(row[colMap.amount]) : 0
+          const interes = colMap.rate !== undefined ? safeFloat(row[colMap.rate]) : 0
+          const cuotas  = colMap.installments !== undefined ? safeFloat(row[colMap.installments]) : 0
+          const metodoRaw = colMap.method !== undefined && row[colMap.method] ? String(row[colMap.method]).trim().toUpperCase() : ''
+          current = {
+            idc: idcStr, cliente: nombreStr, hoja_origen: sheetName, tipo: isInvestmentSheet ? 'inversion' : 'prestamo',
+            fecha_desembolso: parseDateValue(dateVal),
+            monto_original: monto, interes_total: interes,
+            cuotas_pactadas: Math.round(cuotas) || 1,
+            frecuencia: metodoRaw.includes('SEMANA') ? 'weekly' : metodoRaw.includes('MES') ? 'monthly' : 'biweekly',
+            movimientos: [],
+          }
         }
-      }
+        if (current && dateVal && isNumeric(dateVal)) {
+          current.movimientos.push({
+            fecha: xlDate(dateVal),
+            cap_interes: colMap.total !== undefined ? safeFloat(row[colMap.total]) : 0,
+            pago: 0,
+            estatus: colMap.status !== undefined && row[colMap.status] ? String(row[colMap.status]).trim() : '',
+            obs: '',
+          })
+        }
+      } else {
+        // modo plano: cada fila es un registro completo (préstamo, inversión o solicitud)
+        if (!looksLikeName(nameVal)) continue
+        const cliente = cleanName(nameVal)
+        const monto   = colMap.amount !== undefined ? safeFloat(amountVal) : 0
+        const interes = colMap.rate !== undefined ? safeFloat(row[colMap.rate]) : 0
+        const totalCol = colMap.total !== undefined ? safeFloat(row[colMap.total]) : 0
+        const cuotas  = colMap.installments !== undefined ? safeFloat(row[colMap.installments]) : 0
+        const metodoRaw = colMap.method !== undefined && row[colMap.method] ? String(row[colMap.method]).trim().toUpperCase() : ''
+        const statusTxt = colMap.status !== undefined && row[colMap.status] ? String(row[colMap.status]).trim() : ''
+        const fecha = parseDateValue(dateVal)
+        const totalPactado = totalCol > 0 ? totalCol : (monto + interes)
 
-      if (current && fechaVal && isNumeric(fechaVal)) {
-        current.movimientos.push({
-          fecha: xlDate(fechaVal),
-          cap_interes: colMap.capinteres !== undefined ? safeFloat(row[colMap.capinteres]) : 0,
-          pago: colMap.pagos !== undefined ? safeFloat(row[colMap.pagos]) : 0,
-          estatus: colMap.estatus !== undefined && row[colMap.estatus] ? String(row[colMap.estatus]).trim() : '',
-          obs: colMap.obs !== undefined && row[colMap.obs] ? String(row[colMap.obs]).trim() : '',
+        // sin monto y sin fecha: no hay suficiente información financiera, se omite esta fila puntual
+        if (monto === 0 && !fecha && totalCol === 0) continue
+
+        recordsInSheet.push({
+          idc: '', cliente, hoja_origen: sheetName, tipo: isInvestmentSheet ? 'inversion' : 'prestamo',
+          fecha_desembolso: fecha,
+          monto_original: monto, interes_total: interes,
+          cuotas_pactadas: Math.round(cuotas) || 1,
+          frecuencia: metodoRaw.includes('SEMANA') ? 'weekly' : metodoRaw.includes('MES') ? 'monthly' : 'biweekly',
+          movimientos: [{ fecha, cap_interes: totalPactado, pago: 0, estatus: statusTxt, obs: '' }],
         })
       }
     }
-    if (current && current.movimientos.length > 0) loansInSheet.push(current)
+    if (useGroupedMode && current && current.movimientos.length > 0) recordsInSheet.push(current)
 
-    if (loansInSheet.length > 0) {
-      sheetsReport.processed.push({ sheet: sheetName, count: loansInSheet.length })
-      allLoans.push(...loansInSheet)
+    if (recordsInSheet.length > 0) {
+      sheetsReport.processed.push({ sheet: sheetName, count: recordsInSheet.length })
+      allRecords.push(...recordsInSheet)
     } else {
-      sheetsReport.noHeader.push(sheetName)
+      sheetsReport.empty.push(sheetName)
     }
   }
 
-  // enriquecer cada préstamo con totales derivados de sus movimientos
-  const enriched = allLoans.map(l => {
+  const enriched = allRecords.map(l => {
     const movs = l.movimientos
     const totalPagado   = movs.reduce((s, m) => s + (m.pago > 0 ? m.pago : 0), 0)
     const ultimoMov     = movs[movs.length - 1]
     const capRestante   = ultimoMov ? Math.max(0, ultimoMov.cap_interes) : l.monto_original + l.interes_total
     const totalPactado  = l.monto_original + l.interes_total
     const textoEstatus  = movs.map(m => (m.estatus + ' ' + m.obs).toUpperCase()).join(' ')
-    const saldado = capRestante <= 0 || /SALDO|SALDADO/.test(textoEstatus)
+    const saldado = /SALDO|SALDADO|PAGADO/.test(textoEstatus)
     const primerNombre = l.cliente.split(' ')[0] || l.cliente
     const apellidos     = l.cliente.split(' ').slice(1).join(' ') || 'Histórico HPA'
 
@@ -243,15 +296,14 @@ async function parseExcel(file, onSheetProgress) {
       ...l,
       first_name: primerNombre,
       last_name: apellidos,
-      total_pactado: totalPactado,
+      total_pactado: totalPactado || capRestante,
       total_pagado: totalPagado,
-      cap_restante: capRestante,
+      cap_restante: saldado ? 0 : capRestante,
       status: saldado ? 'paid' : 'active',
       num_movimientos: movs.length,
     }
   })
 
-  // deduplicar por cliente + fecha desembolso + monto (mismo préstamo detectado 2 veces)
   const seen = new Set()
   const deduped = enriched.filter(l => {
     const key = `${l.cliente}|${l.fecha_desembolso}|${l.monto_original}`
@@ -340,7 +392,7 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
           total_periods: loan.cuotas_pactadas, cuota_individual: montoCuota,
           total_interes: loan.interes_total, total_pagar: loan.total_pactado,
           total_pagado_historico: loan.total_pagado,
-          importado_historico: true, idc_original: loan.idc,
+          importado_historico: true, idc_original: loan.idc, tipo_origen: loan.tipo,
           hoja_origen: loan.hoja_origen, movimientos_historicos: loan.movimientos,
         }
       }).select('id').single()
@@ -392,11 +444,9 @@ export default function Import() {
       const { loans, report } = await parseExcel(f, (sheetName) => setScanningSheet(sheetName))
       setReport(report)
       if (!loans.length) {
-        const totalHojas = report.discarded.length + report.noHeader.length + report.processed.length
         setError(
-          `El archivo tiene ${totalHojas} hoja(s). Se descartaron ${report.discarded.length} por ser cálculo/operativas, ` +
-          `y ${report.noHeader.length} no tenían el patrón de encabezado esperado (IDC, FECHA, NOMBRES...). ` +
-          `Ninguna hoja produjo préstamos válidos. Revisa el detalle abajo o el nombre de tus columnas.`
+          `No se encontraron registros con nombre y monto en ninguna hoja de este archivo. ` +
+          `Revisa el detalle abajo para ver qué se leyó en cada hoja.`
         )
       }
       setPreview(loans)
@@ -484,7 +534,7 @@ export default function Import() {
               <button className="text-xs text-hpa-slate-5 flex items-center gap-1 hover:text-hpa-slate-7"
                 onClick={() => setShowReport(!showReport)}>
                 {showReport ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                Ver detalle de hojas leídas ({report.processed.length} procesadas, {report.discarded.length} descartadas, {report.noHeader.length} sin patrón)
+                Ver detalle de hojas leídas ({report.processed.length} con registros, {report.discarded.length} de cálculo/referencia, {report.empty.length} sin datos de clientes)
               </button>
               {showReport && (
                 <div className="mt-2 p-3 bg-hpa-slate-1 rounded-lg text-xs space-y-2">
@@ -498,9 +548,9 @@ export default function Import() {
                       <p className="text-hpa-slate-4">{report.discarded.join(', ')}</p>
                     </div>
                   )}
-                  {report.noHeader.length > 0 && (
-                    <div><p className="font-semibold text-amber-600 mb-1">Sin patrón de préstamo reconocido:</p>
-                      <p className="text-hpa-slate-4">{report.noHeader.join(', ')}</p>
+                  {report.empty.length > 0 && (
+                    <div><p className="font-semibold text-hpa-slate-5 mb-1">Sin datos de clientes:</p>
+                      <p className="text-hpa-slate-4">{report.empty.join(', ')}</p>
                     </div>
                   )}
                 </div>
@@ -539,12 +589,12 @@ export default function Import() {
             <div className="table-wrapper max-h-[500px] overflow-y-auto">
               <table className="table text-xs">
                 <thead>
-                  <tr><th>IDC</th><th>Cliente</th><th>Hoja</th><th>Desembolso</th><th>Monto</th><th>Cuotas</th><th>Frecuencia</th><th>Movimientos</th><th>Cap. Restante</th><th>Estado</th></tr>
+                  <tr><th>Tipo</th><th>Cliente</th><th>Hoja</th><th>Desembolso</th><th>Monto</th><th>Cuotas</th><th>Frecuencia</th><th>Movimientos</th><th>Cap. Restante</th><th>Estado</th></tr>
                 </thead>
                 <tbody>
                   {preview.map((l, i) => (
                     <tr key={i}>
-                      <td className="font-mono text-hpa-slate-5">{l.idc}</td>
+                      <td><span className={`badge ${l.tipo === 'inversion' ? 'badge-blue' : 'badge-gray'}`}>{l.tipo === 'inversion' ? 'Inversión' : 'Préstamo'}</span></td>
                       <td className="font-semibold">{l.cliente}</td>
                       <td className="text-hpa-slate-4 text-2xs">{l.hoja_origen}</td>
                       <td className="text-hpa-slate-5">{l.fecha_desembolso || '—'}</td>
