@@ -342,7 +342,7 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
           client_code: `HPA-C-${String((count || 0) + 1).padStart(4, '0')}`,
           type: 'person', status: 'active',
           first_name: loan.first_name, last_name: loan.last_name,
-          nationality: 'DO', kyc_status: 'basic', kyc_level: 1,
+          nationality: 'DO', kyc_level: 1,
           risk_level: 'medium', assigned_to: userId, created_by: userId,
         }).select('id').single()
         if (ce) throw new Error('Cliente: ' + ce.message)
