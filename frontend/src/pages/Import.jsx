@@ -79,6 +79,12 @@ function parseDateValue(v) {
 }
 
 const NAME_HEADER_WORDS = ['NOMBRE COMPLETO', 'NOMBRE', 'NOMBRES', 'CLIENTE', 'CLIENTES', 'SOLICITANTE']
+function looksLikePhone(v) {
+  if (!v) return ''
+  const digits = String(v).replace(/[^0-9]/g, '')
+  return digits.length >= 6 ? String(v).trim() : ''
+}
+
 function looksLikeName(v) {
   if (!v) return false
   const s = String(v).trim()
@@ -236,7 +242,7 @@ async function parseExcel(file, onSheetProgress) {
             monto_original: monto, interes_total: interes,
             cuotas_pactadas: Math.round(cuotas) || 1,
             frecuencia: metodoRaw.includes('SEMANA') ? 'weekly' : metodoRaw.includes('MES') ? 'monthly' : 'biweekly',
-            telefono: colMap.phone !== undefined && row[colMap.phone] ? String(row[colMap.phone]).trim() : '',
+            telefono: colMap.phone !== undefined ? looksLikePhone(row[colMap.phone]) : '',
             movimientos: [],
           }
         }
@@ -271,7 +277,7 @@ async function parseExcel(file, onSheetProgress) {
           monto_original: monto, interes_total: interes,
           cuotas_pactadas: Math.round(cuotas) || 1,
           frecuencia: metodoRaw.includes('SEMANA') ? 'weekly' : metodoRaw.includes('MES') ? 'monthly' : 'biweekly',
-          telefono: colMap.phone !== undefined && row[colMap.phone] ? String(row[colMap.phone]).trim() : '',
+          telefono: colMap.phone !== undefined ? looksLikePhone(row[colMap.phone]) : '',
           movimientos: [{ fecha, cap_interes: totalPactado, pago: 0, estatus: statusTxt, obs: '' }],
         })
       }
@@ -356,26 +362,45 @@ async function insertClientResilient(basePayload) {
   return { data: null, error: { message: 'No se pudo crear el cliente tras varios intentos de autocompletar campos obligatorios.' } }
 }
 
+// Compara nombres completos normalizados (sin acentos, mayúsculas, espacios de más)
+// para no crear un cliente duplicado cuando el mismo nombre viene partido distinto
+// entre hojas (ej. "Herik Yamil" en una hoja vs "Herik Yamil Perez" en otra).
+function normalizeName(s) {
+  return String(s || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ').trim()
+}
+
 // ─── Importación a Supabase ─────────────────────────────────
 async function importToSupabase(loans, companyId, branchId, userId, onProgress) {
   const results = { created: 0, skipped: 0, errors: [] }
+
+  const { data: allClients } = await supabase
+    .from('clients').select('id, first_name, last_name')
+    .eq('company_id', companyId)
+  const clientIndex = (allClients || []).map(c => ({
+    id: c.id,
+    tokens: normalizeName(`${c.first_name} ${c.last_name}`).split(' ').filter(Boolean),
+  }))
+
+  function findExistingClient(fullName) {
+    const tokens = normalizeName(fullName).split(' ').filter(Boolean)
+    if (!tokens.length) return null
+    // considera "el mismo cliente" si comparten el primer nombre y al menos otro token (apellido)
+    const match = clientIndex.find(c =>
+      c.tokens[0] === tokens[0] && c.tokens.some(t => tokens.includes(t) && t !== tokens[0])
+    )
+    return match ? match.id : null
+  }
 
   for (let i = 0; i < loans.length; i++) {
     const loan = loans[i]
     onProgress(Math.round((i / loans.length) * 100), loan.cliente)
 
     try {
-      const { data: existing } = await supabase
-        .from('clients').select('id')
-        .eq('company_id', companyId)
-        .ilike('first_name', loan.first_name)
-        .ilike('last_name', loan.last_name)
-        .limit(1)
-
-      let clientId
-      if (existing && existing.length > 0) {
-        clientId = existing[0].id
-      } else {
+      let clientId = findExistingClient(loan.cliente)
+      if (!clientId) {
         const { count } = await supabase
           .from('clients').select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)
@@ -392,6 +417,7 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
         })
         if (ce) throw new Error('Cliente: ' + ce.message)
         clientId = nc.id
+        clientIndex.push({ id: clientId, tokens: normalizeName(loan.cliente).split(' ').filter(Boolean) })
       }
 
       const { data: loanExist } = await supabase.from('loans').select('id')
