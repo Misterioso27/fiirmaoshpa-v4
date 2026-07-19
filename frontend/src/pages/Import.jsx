@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Play, ChevronDown, ChevronRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Spinner, Empty } from '@/components/ui'
@@ -370,6 +370,8 @@ export default function Import() {
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   const branchId  = user?.branch?.id  || 'b0000000-0000-4000-8000-000000000001'
 
+  const fileInputRef = useRef(null)
+  const [dragOver, setDragOver] = useState(false)
   const [file, setFile]           = useState(null)
   const [parsing, setParsing]     = useState(false)
   const [scanningSheet, setScanningSheet] = useState('')
@@ -403,6 +405,18 @@ export default function Import() {
     setScanningSheet('')
   }, [])
 
+  function triggerFilePicker() {
+    fileInputRef.current?.click()
+  }
+
+  function onDragOver(e) { e.preventDefault(); setDragOver(true) }
+  function onDragLeave(e) { e.preventDefault(); setDragOver(false) }
+  function onDrop(e) {
+    e.preventDefault(); setDragOver(false)
+    const f = e.dataTransfer.files?.[0]
+    if (f) handleFile(f)
+  }
+
   async function runImport() {
     setImporting(true)
     try {
@@ -423,10 +437,12 @@ export default function Import() {
 
       {!preview.length && !importing && !results && (
         <div className="card">
-          <label className={`block border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
-            file ? 'border-hpa-700 bg-hpa-700/5' : 'border-hpa-slate-3 hover:border-hpa-slate-4'
-          }`}>
-            <input type="file" className="hidden" accept=".xlsx"
+          <div
+            onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+            className={`block border-2 border-dashed rounded-xl p-10 text-center transition-all ${
+              dragOver ? 'border-hpa-700 bg-hpa-700/10' : file ? 'border-hpa-700 bg-hpa-700/5' : 'border-hpa-slate-3 hover:border-hpa-slate-4'
+            }`}>
+            <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx"
               onChange={e => handleFile(e.target.files[0])} />
             {parsing ? (
               <div className="flex flex-col items-center gap-3">
@@ -439,13 +455,23 @@ export default function Import() {
                 <FileSpreadsheet size={48} className="text-hpa-slate-4" />
                 <div>
                   <p className="text-sm font-semibold text-hpa-slate-8">
-                    {file ? file.name : 'Arrastra tu Excel aquí o haz click para seleccionar'}
+                    {file ? file.name : 'Arrastra tu Excel aquí'}
                   </p>
                   <p className="text-xs text-hpa-slate-5 mt-1">Formato: .xlsx — cualquier número de hojas, cualquier cliente</p>
                 </div>
+                <div className="flex gap-3 mt-2">
+                  <button type="button" className="btn btn-primary" onClick={triggerFilePicker}>
+                    <Upload size={14} /> {file ? 'Elegir otro archivo' : 'Seleccionar archivo Excel'}
+                  </button>
+                  {file && (
+                    <button type="button" className="btn btn-ghost" onClick={() => handleFile(file)}>
+                      <Play size={14} /> Procesar archivo
+                    </button>
+                  )}
+                </div>
               </div>
             )}
-          </label>
+          </div>
 
           {error && (
             <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex gap-2">
