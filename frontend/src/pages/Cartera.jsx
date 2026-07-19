@@ -1,338 +1,423 @@
-import { useState, useEffect } from 'react'
-import { LayoutList, Download, Settings2, Search, RefreshCw, ChevronUp, ChevronDown, X } from 'lucide-react'
-import { supabase, fmtDate } from '@/lib/supabase'import { createClient } from '@supabase/supabase-js'
-import { fmtDate } from '@/lib/supabase'
-
-const supabase = createClient(
-  'https://ylodmopafxauvwurfweh.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb2Rtb3BhZnhhdXZ3dXJmd2VoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5MTM3NDMsImV4cCI6MjA5NjQ4OTc0M30.QlfDUGbn_O7EjRbbyuEPQVWiNxwLN0EZelV0uxPO7JA'
-)import { Spinner, Empty, Pagination } from '@/components/ui'
+import { useState, useCallback } from 'react'
+import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Play } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { Spinner, Empty } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
-const COMPANY_ID = 'a0000000-0000-4000-8000-000000000001'
-
-const ALL_COLUMNS = [
-  { key: 'loan_code',        label: 'Código',           always: true  },
-  { key: 'client_name',      label: 'Cliente',          always: true  },
-  { key: 'client_phone',     label: 'Teléfono',         always: false },
-  { key: 'disbursed_at',     label: 'Fecha Desembolso', always: false },
-  { key: 'currency',         label: 'Moneda',           always: false },
-  { key: 'principal',        label: 'Monto Prestado',   always: false },
-  { key: 'approved_amount',  label: 'Monto Aprobado',   always: false },
-  { key: 'rate_monthly',     label: 'Tasa Mensual',     always: false },
-  { key: 'term_months',      label: 'Plazo',            always: false },
-  { key: 'frequency',        label: 'Frecuencia',       always: false },
-  { key: 'payment_amount',   label: 'Cuota',            always: false },
-  { key: 'total_interest',   label: 'Interés Total',    always: false },
-  { key: 'total_amount',     label: 'Cap. + Interés',   always: false },
-  { key: 'balance_total',    label: 'Saldo Restante',   always: false },
-  { key: 'next_payment_date',label: 'Próximo Pago',     always: false },
-  { key: 'days_overdue',     label: 'Días Mora',        always: false },
-  { key: 'status',           label: 'Estado',           always: true  },
-]
-
-const DEFAULT_COLS = ['loan_code','client_name','disbursed_at','principal','rate_monthly','term_months','frequency','payment_amount','total_amount','balance_total','days_overdue','status']
-const STATUS_LABELS = { active: 'ACTIVO', overdue: 'VENCIDO', paid: 'SALDADO', defaulted: 'DEFAULT', written_off: 'CASTIGADO' }
-const STATUS_COLORS = { active: 'badge-blue', overdue: 'badge-red', paid: 'badge-green', defaulted: 'badge-red', written_off: 'badge-gray' }
-const FREQ_LABELS   = { weekly: 'Semanal', biweekly: 'Quincenal', monthly: 'Mensual' }
-
-function fmtMoney(v, curr = 'DOP') {
-  const sym = { DOP: 'RD$', BRL: 'R$', USD: '$', EUR: '€', GBP: '£' }[curr] || 'RD$'
-  return `${sym} ${parseFloat(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+function safeFloat(v, def = 0) {
+  try { return parseFloat(String(v || def).replace(/,/g, '').replace(/P\$|\$/g, '')) || def }
+  catch { return def }
 }
 
-export default function Cartera() {
-  const { user } = useAuthStore()
-  const storageKey = `hpa_cartera_cols_${user?.id || 'default'}`
+function cleanName(s) {
+  if (!s) return ''
+  s = String(s).trim()
+  s = s.replace(/^\d+[NnOo°\.]*\s*/g, '')
+  s = s.replace(/^\d+[a-zA-Z]*\.\s*/g, '')
+  return s.replace(/\s+/g, ' ').trim() || String(s)
+}
 
-  const [allLoans, setAllLoans] = useState([])
-  const [loans, setLoans]       = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [page, setPage]         = useState(1)
-  const [search, setSearch]     = useState('')
-  const [status, setStatus]     = useState('')
-  const [sortCol, setSortCol]   = useState('disbursed_at')
-  const [sortDir, setSortDir]   = useState('desc')
-  const [showColPicker, setShowColPicker] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [activeCols, setActiveCols] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(storageKey)) || DEFAULT_COLS }
-    catch { return DEFAULT_COLS }
+function isValidName(s) {
+  s = String(s || '').trim()
+  if (!s || s.length < 3) return false
+  try { parseFloat(s.replace(/,/g, '').replace(/\./g, '')); return false } catch {}
+  return true
+}
+
+function xlDate(serial) {
+  try {
+    const base = new Date(1899, 11, 30)
+    base.setDate(base.getDate() + parseInt(serial))
+    return base.toISOString().split('T')[0]
+  } catch { return null }
+}
+
+async function parseExcel(file) {
+  const arrayBuffer = await file.arrayBuffer()
+  const uint8 = new Uint8Array(arrayBuffer)
+  if (uint8[0] !== 0x50 || uint8[1] !== 0x4B) throw new Error('El archivo no es un Excel válido (.xlsx)')
+
+  await new Promise((res, rej) => {
+    if (window.JSZip) return res()
+    const s = document.createElement('script')
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'
+    s.onload = res; s.onerror = rej
+    document.head.appendChild(s)
   })
 
-  const PAGE_SIZE = 25
+  const zip    = await window.JSZip.loadAsync(arrayBuffer)
+  const parser = new DOMParser()
 
-  // ── Cargar datos ──────────────────────────────────────────
-  async function load() {
-    setLoading(true)
-    try {
-      const { data, error } = await supabase
-        .from('loans')
-        .select(`
-          id, loan_code, type, currency, principal, approved_amount,
-          rate_monthly, term_months, payment_amount, total_interest,
-          total_amount, balance_total, balance_principal,
-          disbursed_at, first_payment_date, next_payment_date,
-          days_overdue, status, ai_analysis,
-          clients ( first_name, last_name, phone_primary, client_code )
-        `)
-        .eq('company_id', COMPANY_ID)
-        .order('disbursed_at', { ascending: false })
-        .limit(1000)
-
-      if (error) {
-        console.error('Cartera error:', error)
-      } else {
-        setAllLoans(data || [])
-      }
-    } catch (e) {
-      console.error('Cartera exception:', e)
-    }
-    setLoading(false)
+  const strings = []
+  const ssFile = zip.file('xl/sharedStrings.xml')
+  if (ssFile) {
+    const ssXml = await ssFile.async('text')
+    const ssDoc = parser.parseFromString(ssXml, 'application/xml')
+    ssDoc.querySelectorAll('si').forEach(si => {
+      strings.push(Array.from(si.querySelectorAll('t')).map(t => t.textContent || '').join(''))
+    })
   }
 
-  useEffect(() => { load() }, [])
+  const loans = []
+  const freqMap = { QUICENAL: 'biweekly', QUINCENAL: 'biweekly', SEMANAL: 'weekly', MENSUAL: 'monthly' }
+  const sheetFiles = Object.keys(zip.files).filter(n => n.match(/xl\/worksheets\/sheet\d+\.xml/))
 
-  // ── Filtrar ───────────────────────────────────────────────
-  useEffect(() => {
-    let filtered = [...allLoans]
-    if (status) filtered = filtered.filter(l => l.status === status)
-    if (search.trim()) {
-      const s = search.toLowerCase().trim()
-      filtered = filtered.filter(l =>
-        l.loan_code?.toLowerCase().includes(s) ||
-        `${l.clients?.first_name || ''} ${l.clients?.last_name || ''}`.toLowerCase().includes(s) ||
-        l.clients?.client_code?.toLowerCase().includes(s) ||
-        l.clients?.phone_primary?.toLowerCase().includes(s)
-      )
-    }
-    setLoans(filtered)
-    setPage(1)
-  }, [allLoans, search, status])
+  for (const sheetPath of sheetFiles) {
+    const sheetFile = zip.file(sheetPath)
+    if (!sheetFile) continue
+    const sheetXml = await sheetFile.async('text')
+    const sheetDoc = parser.parseFromString(sheetXml, 'application/xml')
+    const rows     = Array.from(sheetDoc.querySelectorAll('row'))
 
-  function toggleCol(key) {
-    const col = ALL_COLUMNS.find(c => c.key === key)
-    if (col?.always) return
-    const next = activeCols.includes(key)
-      ? activeCols.filter(c => c !== key)
-      : [...activeCols, key]
-    setActiveCols(next)
-    localStorage.setItem(storageKey, JSON.stringify(next))
-  }
-
-  function handleSort(col) {
-    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortCol(col); setSortDir('asc') }
-    load()
-  }
-
-  // ── Exportar CSV ──────────────────────────────────────────
-  async function exportCSV() {
-    setExporting(true)
-    try {
-      const visibleCols = ALL_COLUMNS.filter(c => activeCols.includes(c.key))
-      const headers = visibleCols.map(c => c.label)
-      const rows = loans.map(l => {
-        const freq = l.ai_analysis?.frequency || 'monthly'
-        const clientName = `${l.clients?.first_name || ''} ${l.clients?.last_name || ''}`.trim()
-        return visibleCols.map(c => {
-          switch (c.key) {
-            case 'loan_code':         return l.loan_code || ''
-            case 'client_name':       return clientName
-            case 'client_phone':      return l.clients?.phone_primary || ''
-            case 'disbursed_at':      return l.disbursed_at || ''
-            case 'currency':          return l.currency || 'DOP'
-            case 'principal':         return l.principal || 0
-            case 'approved_amount':   return l.approved_amount || l.principal || 0
-            case 'rate_monthly':      return `${l.rate_monthly}%`
-            case 'term_months':       return l.term_months || ''
-            case 'frequency':         return FREQ_LABELS[freq] || freq
-            case 'payment_amount':    return l.payment_amount || 0
-            case 'total_interest':    return l.total_interest || 0
-            case 'total_amount':      return l.total_amount || 0
-            case 'balance_total':     return l.balance_total || 0
-            case 'next_payment_date': return l.next_payment_date || ''
-            case 'days_overdue':      return l.days_overdue || 0
-            case 'status':            return STATUS_LABELS[l.status] || l.status
-            default: return ''
-          }
-        })
+    for (let ri = 1; ri < rows.length; ri++) {
+      // Mapear celdas por su columna real (atributo r, ej. "B5") — Excel omite celdas vacías,
+      // así que el índice posicional del array se desalinea. Este era el fallo silencioso.
+      const cellMap = {}
+      Array.from(rows[ri].querySelectorAll('c')).forEach(c => {
+        const ref = c.getAttribute('r') || ''
+        const letters = ref.replace(/[0-9]/g, '')
+        let n = 0
+        for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64)
+        cellMap[n - 1] = c
       })
-      const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n')
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-      const url  = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `cartera-hpa-${new Date().toISOString().split('T')[0]}.csv`
-      link.click()
-      URL.revokeObjectURL(url)
-    } catch (err) { alert('Error al exportar: ' + err.message) }
-    setExporting(false)
+      const getVal = (idx) => {
+        const c = cellMap[idx]
+        if (!c) return null
+        const t = c.getAttribute('t') || ''
+        const v = c.querySelector('v')
+        if (!v || !v.textContent) return null
+        return t === 's' ? (strings[parseInt(v.textContent)] || '') : v.textContent
+      }
+
+      const idc     = String(getVal(0) || '').trim()
+      const cliente = String(getVal(2) || '').trim()
+      if (!idc || idc === 'IDC' || !isValidName(cliente)) continue
+
+      const fechaRaw = getVal(1)
+      const fecha    = fechaRaw && !isNaN(parseFloat(fechaRaw))
+        ? xlDate(fechaRaw) : '2024-01-01'
+
+      const metodo   = String(getVal(3) || 'QUICENAL').trim().toUpperCase()
+      const cuotasV  = safeFloat(getVal(4), 5)
+      const monto    = safeFloat(getVal(5), 0)
+      const tasaRaw  = safeFloat(getVal(6), 0.3)
+      const tasa     = tasaRaw < 2 ? tasaRaw * 100 : tasaRaw
+      const interes  = safeFloat(getVal(7), 0)
+      const total    = safeFloat(getVal(8), 0)
+      const retornado    = safeFloat(getVal(9), 0)
+      const capRestante  = safeFloat(getVal(13), 0)
+      const obs      = String(getVal(15) || '')
+      const saldado  = obs.toUpperCase() === 'SALDADO' || capRestante === 0
+
+      if (monto < 100 || cuotasV > 100) continue
+
+      const nombreLimpio = cleanName(cliente)
+      const partes       = nombreLimpio.split(' ')
+
+      loans.push({
+        idc, fecha,
+        first_name: partes[0] || nombreLimpio,
+        last_name:  partes.slice(1).join(' ') || 'Histórico HPA',
+        full_name:  nombreLimpio,
+        frecuencia: freqMap[metodo] || 'biweekly',
+        cuotas:     Math.round(cuotasV),
+        monto, tasa: Math.round(tasa * 10) / 10,
+        interes, total: total > 0 ? total : monto + interes,
+        retornado, cap_restante: capRestante,
+        status: saldado ? 'paid' : 'active', obs,
+      })
+    }
   }
 
-  const visibleCols = ALL_COLUMNS.filter(c => activeCols.includes(c.key))
-  const totalFiltered = loans.length
-  const totalPages    = Math.ceil(totalFiltered / PAGE_SIZE)
-  const pageLoans     = loans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const seen = new Set()
+  return loans.filter(l => {
+    const key = `${l.full_name}|${l.fecha}|${l.monto}`
+    if (seen.has(key)) return false
+    seen.add(key); return true
+  })
+}
 
-  function renderCell(loan, colKey) {
-    const freq = loan.ai_analysis?.frequency || 'monthly'
-    const curr = loan.currency || 'DOP'
-    switch (colKey) {
-      case 'loan_code':        return <span className="font-mono text-xs font-semibold text-hpa-700">{loan.loan_code}</span>
-      case 'client_name':      return (
-        <div>
-          <p className="font-semibold text-sm">{loan.clients?.first_name} {loan.clients?.last_name}</p>
-          <p className="text-2xs text-hpa-slate-5">{loan.clients?.client_code}</p>
-        </div>
-      )
-      case 'client_phone':     return <span className="text-xs">{loan.clients?.phone_primary || '—'}</span>
-      case 'disbursed_at':     return <span className="text-xs text-hpa-slate-5">{fmtDate(loan.disbursed_at)}</span>
-      case 'currency':         return <span className="badge badge-blue">{loan.currency}</span>
-      case 'principal':        return <span className="font-numeric font-semibold text-sm">{fmtMoney(loan.principal, curr)}</span>
-      case 'approved_amount':  return <span className="font-numeric text-sm">{fmtMoney(loan.approved_amount || loan.principal, curr)}</span>
-      case 'rate_monthly':     return <span className="font-semibold text-hpa-700">{loan.rate_monthly}%</span>
-      case 'term_months':      return <span className="text-xs text-hpa-slate-6">{loan.term_months}m</span>
-      case 'frequency':        return <span className="text-xs">{FREQ_LABELS[freq] || freq}</span>
-      case 'payment_amount':   return <span className="font-numeric text-sm">{fmtMoney(loan.payment_amount, curr)}</span>
-      case 'total_interest':   return <span className="font-numeric text-amber-600">{fmtMoney(loan.total_interest, curr)}</span>
-      case 'total_amount':     return <span className="font-numeric font-semibold">{fmtMoney(loan.total_amount, curr)}</span>
-      case 'balance_total':    return (
-        <span className={`font-numeric font-semibold ${parseFloat(loan.balance_total) > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-          {fmtMoney(loan.balance_total, curr)}
-        </span>
-      )
-      case 'next_payment_date': return <span className="text-xs text-hpa-slate-5">{loan.next_payment_date ? fmtDate(loan.next_payment_date) : '—'}</span>
-      case 'days_overdue':     return (
-        <span className={`font-semibold text-xs ${loan.days_overdue > 0 ? 'text-red-600' : 'text-hpa-slate-5'}`}>
-          {loan.days_overdue > 0 ? `${loan.days_overdue}d` : '—'}
-        </span>
-      )
-      case 'status':           return <span className={`badge ${STATUS_COLORS[loan.status] || 'badge-gray'}`}>{STATUS_LABELS[loan.status] || loan.status}</span>
-      default: return '—'
+async function importToSupabase(loans, companyId, branchId, userId, onProgress) {
+  const results = { created: 0, skipped: 0, errors: [] }
+
+  for (let i = 0; i < loans.length; i++) {
+    const loan = loans[i]
+    onProgress(Math.round((i / loans.length) * 100), loan.full_name)
+
+    try {
+      const { data: existing } = await supabase
+        .from('clients').select('id')
+        .eq('company_id', companyId)
+        .ilike('first_name', loan.first_name)
+        .ilike('last_name', loan.last_name)
+        .limit(1)
+
+      let clientId
+      if (existing && existing.length > 0) {
+        clientId = existing[0].id
+      } else {
+        const { count } = await supabase
+          .from('clients').select('*', { count: 'exact', head: true })
+          .eq('company_id', companyId)
+        const { data: nc, error: ce } = await supabase.from('clients').insert({
+          company_id: companyId, branch_id: branchId,
+          client_code: `HPA-C-${String((count || 0) + 1).padStart(4, '0')}`,
+          type: 'person', status: 'active',
+          first_name: loan.first_name, last_name: loan.last_name,
+          nationality: 'DO', kyc_status: 'basic', kyc_level: 1,
+          risk_level: 'medium', assigned_to: userId, created_by: userId,
+        }).select('id').single()
+        if (ce) throw new Error('Cliente: ' + ce.message)
+        clientId = nc.id
+      }
+
+      const { data: loanExist } = await supabase.from('loans').select('id')
+        .eq('company_id', companyId).eq('client_id', clientId)
+        .eq('disbursed_at', loan.fecha).eq('principal', loan.monto).limit(1)
+
+      if (loanExist && loanExist.length > 0) { results.skipped++; continue }
+
+      const { count: lc } = await supabase.from('loans')
+        .select('*', { count: 'exact', head: true }).eq('company_id', companyId)
+      const loanCode   = `HPA-L-${String((lc || 0) + 1).padStart(4, '0')}`
+      const totalPagar = loan.total > 0 ? loan.total : loan.monto + loan.interes
+      const montoCuota = Math.round((totalPagar / loan.cuotas) * 100) / 100
+      const diasPeriodo = loan.frecuencia === 'weekly' ? 7 : loan.frecuencia === 'biweekly' ? 15 : 30
+      const fechaBase   = new Date(loan.fecha)
+      const primerPago  = new Date(fechaBase)
+      if (loan.frecuencia === 'monthly') primerPago.setMonth(primerPago.getMonth() + 1)
+      else primerPago.setDate(primerPago.getDate() + diasPeriodo)
+      const ultimoPago  = new Date(fechaBase)
+      if (loan.frecuencia === 'monthly') ultimoPago.setMonth(ultimoPago.getMonth() + loan.cuotas)
+      else ultimoPago.setDate(ultimoPago.getDate() + diasPeriodo * loan.cuotas)
+
+      const { data: ld, error: le } = await supabase.from('loans').insert({
+        company_id: companyId, branch_id: branchId, client_id: clientId,
+        loan_code: loanCode, type: 'personal', currency: 'DOP',
+        principal: loan.monto, rate_monthly: loan.tasa, rate_annual: loan.tasa * 12,
+        term_months: loan.frecuencia === 'biweekly' ? loan.cuotas / 2 : loan.cuotas,
+        payment_amount: montoCuota, total_interest: loan.interes,
+        total_amount: totalPagar, origination_fee: 0,
+        balance_principal: loan.cap_restante, balance_interest: 0,
+        balance_penalties: 0, balance_total: loan.cap_restante,
+        status: loan.status, days_overdue: 0,
+        disbursed_at: loan.fecha,
+        first_payment_date: primerPago.toISOString().split('T')[0],
+        last_payment_date:  ultimoPago.toISOString().split('T')[0],
+        next_payment_date:  loan.status === 'paid' ? null : primerPago.toISOString().split('T')[0],
+        disbursed_by: userId,
+        ai_analysis: {
+          frequency: loan.frecuencia, rate_monthly: loan.tasa,
+          total_periods: loan.cuotas, cuota_individual: montoCuota,
+          total_interes: loan.interes, total_pagar: totalPagar,
+          importado_historico: true, idc_original: loan.idc,
+        }
+      }).select('id').single()
+      if (le) throw new Error('Préstamo: ' + le.message)
+
+      if (loan.status === 'active') {
+        await supabase.from('collection_cases').insert({
+          company_id: companyId, branch_id: branchId,
+          client_id: clientId, loan_id: ld.id,
+          stage: 'preventive', status: 'open',
+          days_overdue: 0, amount_overdue: 0, installments_due: 0,
+        })
+      }
+
+      results.created++
+    } catch (err) {
+      results.errors.push({ name: loan.full_name, error: err.message })
     }
+  }
+  return results
+}
+
+const FREQ_LABELS = { weekly: 'Semanal', biweekly: 'Quincenal', monthly: 'Mensual' }
+
+export default function Import() {
+  const { user } = useAuthStore()
+  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+  const branchId  = user?.branch?.id  || 'b0000000-0000-4000-8000-000000000001'
+
+  const [file, setFile]           = useState(null)
+  const [parsing, setParsing]     = useState(false)
+  const [preview, setPreview]     = useState([])
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress]   = useState(0)
+  const [currentName, setCurrentName] = useState('')
+  const [results, setResults]     = useState(null)
+  const [error, setError]         = useState('')
+
+  const handleFile = useCallback(async (f) => {
+    if (!f) return
+    setFile(f); setPreview([]); setResults(null); setError('')
+    setParsing(true)
+    try {
+      const loans = await parseExcel(f)
+      if (!loans.length) {
+        setError('El archivo se leyó correctamente pero no se detectaron préstamos válidos. Verifica que las columnas sigan el orden esperado: A=IDC, B=Fecha, C=Cliente, D=Método, E=Cuotas, F=Monto, G=Tasa, H=Interés, I=Total, J=Retornado, N=Cap. Restante, P=Observaciones.')
+      }
+      setPreview(loans)
+    } catch (err) { setError('Error al leer el archivo: ' + err.message) }
+    setParsing(false)
+  }, [])
+
+  async function runImport() {
+    if (!preview.length) return
+    setImporting(true); setProgress(0); setResults(null)
+    try {
+      const res = await importToSupabase(
+        preview, companyId, branchId, user.id,
+        (pct, name) => { setProgress(pct); setCurrentName(name) }
+      )
+      setResults(res)
+    } catch (err) { setError('Error: ' + err.message) }
+    setImporting(false)
   }
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-hpa-slate-9">Vista de Cartera</h2>
-          <p className="text-xs text-hpa-slate-5 mt-0.5">
-            {loading ? 'Cargando...' : `${totalFiltered} préstamos`}
-            {search && ` · "${search}"`}
-            {status && ` · ${STATUS_LABELS[status] || status}`}
-            {' · Columnas personalizables'}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Actualizar
-          </button>
-          <button className={`btn btn-ghost btn-sm ${showColPicker ? 'bg-hpa-slate-2' : ''}`}
-            onClick={() => setShowColPicker(!showColPicker)}>
-            <Settings2 size={13} /> Columnas
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={exportCSV} disabled={exporting}>
-            <Download size={13} /> {exporting ? 'Exportando...' : 'Exportar CSV'}
-          </button>
-        </div>
+      <div>
+        <h2 className="text-xl font-bold text-hpa-slate-9">Importar Cartera Histórica</h2>
+        <p className="text-xs text-hpa-slate-5 mt-0.5">Importa clientes y préstamos históricos desde Excel (.xlsx)</p>
       </div>
 
-      {showColPicker && (
-        <div className="card p-4">
-          <p className="text-xs font-semibold text-hpa-slate-7 mb-3">
-            Selecciona las columnas — se guardan automáticamente para tu usuario
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {ALL_COLUMNS.map(col => (
-              <button key={col.key} type="button" disabled={col.always}
-                onClick={() => toggleCol(col.key)}
-                className={`px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all ${
-                  activeCols.includes(col.key)
-                    ? 'border-hpa-700 bg-hpa-700/10 text-hpa-700'
-                    : 'border-hpa-slate-2 text-hpa-slate-5 hover:border-hpa-slate-3'
-                } ${col.always ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                {col.label}{col.always && ' 🔒'}
-              </button>
-            ))}
+      {!preview.length && !importing && !results && (
+        <div className="card">
+          <label className={`block border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
+            file ? 'border-hpa-700 bg-hpa-700/5' : 'border-hpa-slate-3 hover:border-hpa-slate-4'
+          }`}>
+            <input type="file" className="hidden" accept=".xlsx,.xls"
+              onChange={e => handleFile(e.target.files[0])} />
+            {parsing ? (
+              <div className="flex flex-col items-center gap-3">
+                <Spinner size={32} />
+                <p className="text-sm text-hpa-slate-6">Leyendo archivo...</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <FileSpreadsheet size={48} className="text-hpa-slate-4" />
+                <div>
+                  <p className="text-sm font-semibold text-hpa-slate-8">
+                    {file ? file.name : 'Arrastra tu Excel aquí o haz click para seleccionar'}
+                  </p>
+                  <p className="text-xs text-hpa-slate-5 mt-1">Formato: .xlsx — Cartera histórica de préstamos</p>
+                </div>
+              </div>
+            )}
+          </label>
+          {error && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex gap-2">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />{error}
+            </div>
+          )}
+          <div className="mt-6 p-4 bg-hpa-slate-1 rounded-xl border border-hpa-slate-2">
+            <p className="text-xs font-semibold text-hpa-slate-7 mb-3">¿Qué importa el sistema?</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-hpa-slate-6 text-center">
+              {[['👤','Clientes','Crea perfil si no existe'],['💳','Préstamos','Con montos y fechas'],['📊','Estados','Activos y saldados'],['📞','Cobranza','Casos para activos']].map(([icon, label, desc]) => (
+                <div key={label}><p className="text-2xl mb-1">{icon}</p><p className="font-semibold">{label}</p><p className="text-hpa-slate-4">{desc}</p></div>
+              ))}
+            </div>
           </div>
-          <p className="text-2xs text-hpa-slate-4 mt-3">🔒 = columna fija</p>
         </div>
       )}
 
-      <div className="card p-4 flex gap-3 flex-wrap items-center">
-        <div className="relative flex-1 min-w-48">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-hpa-slate-4" />
-          <input className="input pl-8 pr-8 text-sm"
-            placeholder="Buscar por nombre, código o teléfono..."
-            value={search} onChange={e => setSearch(e.target.value)} />
-          {search && (
-            <button className="absolute right-2 top-1/2 -translate-y-1/2 text-hpa-slate-4 hover:text-hpa-slate-7"
-              onClick={() => setSearch('')}>
-              <X size={13} />
-            </button>
-          )}
-        </div>
-        <select className="select w-44" value={status} onChange={e => setStatus(e.target.value)}>
-          <option value="">Todos los estados</option>
-          <option value="active">Activos</option>
-          <option value="overdue">Vencidos</option>
-          <option value="paid">Saldados</option>
-          <option value="defaulted">Default</option>
-        </select>
-        {(search || status) && (
-          <button className="btn btn-ghost btn-sm text-hpa-slate-5"
-            onClick={() => { setSearch(''); setStatus('') }}>
-            <X size={13} /> Limpiar
-          </button>
-        )}
-      </div>
-
-      <div className="card p-0 overflow-hidden">
-        <div className="table-wrapper overflow-x-auto max-h-[600px] overflow-y-auto">
-          <table className="table text-xs whitespace-nowrap">
-            <thead className="sticky top-0 z-10">
-              <tr>
-                {visibleCols.map(col => (
-                  <th key={col.key}
-                    className="cursor-pointer select-none hover:bg-hpa-slate-2 transition-colors"
-                    onClick={() => handleSort(col.key)}>
-                    <div className="flex items-center gap-1">
-                      {col.label}
-                      {sortCol === col.key && (
-                        sortDir === 'asc'
-                          ? <ChevronUp size={11} className="text-hpa-700" />
-                          : <ChevronDown size={11} className="text-hpa-700" />
-                      )}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={visibleCols.length} className="py-12 text-center">
-                  <Spinner size={20} className="mx-auto" />
-                </td></tr>
-              ) : pageLoans.length === 0 ? (
-                <tr><td colSpan={visibleCols.length}>
-                  <Empty icon={LayoutList}
-                    title={search ? `Sin resultados para "${search}"` : 'Sin préstamos'}
-                    desc={search ? 'Intenta con otro nombre o código' : 'No se encontraron registros'} />
-                </td></tr>
-              ) : pageLoans.map(loan => (
-                <tr key={loan.id} className="hover:bg-hpa-slate-1">
-                  {visibleCols.map(col => (
-                    <td key={col.key}>{renderCell(loan, col.key)}</td>
+      {preview.length > 0 && !importing && !results && (
+        <div className="space-y-4">
+          <div className="card p-4 flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-hpa-slate-9">{preview.length} préstamos detectados</p>
+              <p className="text-xs text-hpa-slate-5 mt-0.5">Revisa la lista antes de confirmar</p>
+            </div>
+            <div className="flex gap-3">
+              <button className="btn btn-ghost btn-sm" onClick={() => { setPreview([]); setFile(null) }}>
+                <X size={13} /> Cancelar
+              </button>
+              <button className="btn btn-primary" onClick={runImport}>
+                <Play size={13} /> Importar Ahora
+              </button>
+            </div>
+          </div>
+          <div className="card p-0 overflow-hidden">
+            <div className="table-wrapper max-h-[500px] overflow-y-auto">
+              <table className="table text-xs">
+                <thead>
+                  <tr><th>#</th><th>Cliente</th><th>Fecha</th><th>Monto</th><th>Tasa</th><th>Cuotas</th><th>Frecuencia</th><th>Cap. Restante</th><th>Estado</th></tr>
+                </thead>
+                <tbody>
+                  {preview.map((l, i) => (
+                    <tr key={i}>
+                      <td className="font-mono text-hpa-slate-5">{l.idc}</td>
+                      <td className="font-semibold">{l.full_name}</td>
+                      <td className="text-hpa-slate-5">{l.fecha}</td>
+                      <td className="font-numeric font-semibold">RD$ {l.monto.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="text-hpa-700 font-semibold">{l.tasa}%</td>
+                      <td className="text-center">{l.cuotas}</td>
+                      <td>{FREQ_LABELS[l.frecuencia] || l.frecuencia}</td>
+                      <td className="font-numeric">{l.cap_restante > 0 ? `RD$ ${l.cap_restante.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</td>
+                      <td><span className={`badge ${l.status === 'paid' ? 'badge-green' : 'badge-blue'}`}>{l.status === 'paid' ? 'SALDADO' : 'ACTIVO'}</span></td>
+                    </tr>
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        <Pagination page={page} pages={totalPages} total={totalFiltered} limit={PAGE_SIZE} onChange={setPage} />
-      </div>
+      )}
+
+      {importing && (
+        <div className="card text-center py-10 space-y-4">
+          <Spinner size={36} className="mx-auto" />
+          <div>
+            <p className="font-semibold text-hpa-slate-9">Importando cartera histórica...</p>
+            <p className="text-xs text-hpa-slate-5 mt-1">{currentName}</p>
+          </div>
+          <div className="max-w-sm mx-auto">
+            <div className="h-2 bg-hpa-slate-2 rounded-full overflow-hidden">
+              <div className="h-full bg-hpa-700 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+            </div>
+            <p className="text-xs text-hpa-slate-5 mt-1">{progress}%</p>
+          </div>
+        </div>
+      )}
+
+      {results && (
+        <div className="card space-y-4">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 size={24} className="text-emerald-500" />
+            <div>
+              <p className="font-bold text-hpa-slate-9">Importación completada</p>
+              <p className="text-xs text-hpa-slate-5">La cartera histórica fue procesada exitosamente</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+              <p className="text-2xl font-bold text-emerald-700">{results.created}</p>
+              <p className="text-xs text-emerald-600">Préstamos creados</p>
+            </div>
+            <div className="p-4 bg-hpa-slate-1 border border-hpa-slate-2 rounded-xl text-center">
+              <p className="text-2xl font-bold text-hpa-slate-6">{results.skipped}</p>
+              <p className="text-xs text-hpa-slate-5">Ya existían</p>
+            </div>
+            <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-center">
+              <p className="text-2xl font-bold text-red-600">{results.errors.length}</p>
+              <p className="text-xs text-red-500">Con errores</p>
+            </div>
+          </div>
+          {results.errors.length > 0 && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+              <p className="text-xs font-semibold text-red-700 mb-2">Registros con error:</p>
+              {results.errors.map((e, i) => (
+                <p key={i} className="text-xs text-red-600">• {e.name}: {e.error}</p>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button className="btn btn-primary" onClick={() => window.location.href = '/loans'}>Ver Préstamos</button>
+            <button className="btn btn-ghost" onClick={() => { setResults(null); setPreview([]); setFile(null) }}>Importar otro</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
