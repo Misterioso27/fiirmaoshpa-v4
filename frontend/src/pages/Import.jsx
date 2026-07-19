@@ -428,14 +428,6 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
         last_payment_date:  ultimoPago.toISOString().split('T')[0],
         next_payment_date:  loan.status === 'paid' ? null : primerPago.toISOString().split('T')[0],
         disbursed_by: userId,
-        ai_analysis: {
-          frequency: loan.frecuencia, rate_monthly: rateMonthly,
-          total_periods: loan.cuotas_pactadas, cuota_individual: montoCuota,
-          total_interes: loan.interes_total, total_pagar: loan.total_pactado,
-          total_pagado_historico: loan.total_pagado,
-          importado_historico: true, idc_original: loan.idc, tipo_origen: loan.tipo,
-          hoja_origen: loan.hoja_origen, movimientos_historicos: loan.movimientos,
-        }
       }).select('id').single()
       if (le) throw new Error('Préstamo: ' + le.message)
 
