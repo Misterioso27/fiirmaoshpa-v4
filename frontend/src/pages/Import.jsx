@@ -316,6 +316,42 @@ async function parseExcel(file, onSheetProgress) {
   return { loans: deduped, report: sheetsReport }
 }
 
+// ─── Valores por defecto cuando la BD exige una columna NOT NULL que no viene del Excel ──
+function defaultForColumn(col, idx) {
+  const c = col.toLowerCase()
+  if (c.includes('phone') || c.includes('celular') || c.includes('telefono')) return 'N/A'
+  if (c.includes('email') || c.includes('correo')) return `sin-email-${Date.now()}-${idx}@fiirmaoshpa.com`
+  if (c.includes('address') || c.includes('direccion')) return 'No especificada (importación histórica)'
+  if (c.includes('city') || c.includes('ciudad')) return 'No especificada'
+  if (c.includes('state') || c.includes('province') || c.includes('provincia')) return 'No especificada'
+  if (c.includes('country') || c.includes('pais')) return 'DO'
+  if (c.includes('postal') || c.includes('zip') || c.includes('codigo_postal')) return '00000'
+  if (c.includes('national_id') || c.includes('cedula') || c.includes('document')) return `SIN-CEDULA-${Date.now()}${idx}`
+  if (c.includes('birth') || c.includes('nacimiento')) return '1990-01-01'
+  if (c.includes('occupation') || c.includes('ocupacion') || c.includes('employer') || c.includes('empresa')) return 'No especificado'
+  if (c.includes('income') || c.includes('salario') || c.includes('salary')) return 0
+  if (c.includes('emergency') || c.includes('emergencia')) return 'No especificado'
+  if (c.includes('gender') || c.includes('genero') || c.includes('sexo')) return 'N/A'
+  return 'N/A'
+}
+
+// Inserta un cliente reintentando: si Postgres dice "falta la columna X", se le agrega
+// un valor por defecto y se reintenta, hasta que el insert pase o se agoten los intentos.
+async function insertClientResilient(basePayload) {
+  let payload = { ...basePayload }
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { data, error } = await supabase.from('clients').insert(payload).select('id').single()
+    if (!error) return { data, error: null }
+    const m = error.message.match(/column "([^"]+)"/)
+    if (error.message.includes('not-null') && m && payload[m[1]] === undefined) {
+      payload[m[1]] = defaultForColumn(m[1], Date.now() % 100000)
+      continue
+    }
+    return { data: null, error }
+  }
+  return { data: null, error: { message: 'No se pudo crear el cliente tras varios intentos de autocompletar campos obligatorios.' } }
+}
+
 // ─── Importación a Supabase ─────────────────────────────────
 async function importToSupabase(loans, companyId, branchId, userId, onProgress) {
   const results = { created: 0, skipped: 0, errors: [] }
@@ -339,16 +375,17 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
         const { count } = await supabase
           .from('clients').select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)
-        const { data: nc, error: ce } = await supabase.from('clients').insert({
+        const { data: nc, error: ce } = await insertClientResilient({
           company_id: companyId, branch_id: branchId,
           client_code: `HPA-C-${String((count || 0) + 1).padStart(4, '0')}`,
           type: 'person', status: 'active',
           first_name: loan.first_name, last_name: loan.last_name,
           phone_primary: loan.telefono || 'N/A',
           address: 'No especificada (importación histórica)',
-          nationality: 'DO', kyc_level: 1,
+          city: 'No especificada',
+          nationality: 'DO', kyc_status: 'pending', kyc_level: 1,
           risk_level: 'medium', assigned_to: userId, created_by: userId,
-        }).select('id').single()
+        })
         if (ce) throw new Error('Cliente: ' + ce.message)
         clientId = nc.id
       }
