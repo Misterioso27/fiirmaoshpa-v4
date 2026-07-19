@@ -47,8 +47,12 @@ export default function Cartera() {
   const { user } = useAuthStore()
   const storageKey = `hpa_cartera_cols_${user?.id || 'default'}`
 
+  const [tab, setTab]           = useState('prestamos') // 'prestamos' | 'clientes'
   const [allLoans, setAllLoans] = useState([])
   const [loans, setLoans]       = useState([])
+  const [allClients, setAllClients] = useState([])
+  const [clientsList, setClientsList] = useState([])
+  const [loadingClients, setLoadingClients] = useState(true)
   const [loading, setLoading]   = useState(true)
   const [page, setPage]         = useState(1)
   const [search, setSearch]     = useState('')
@@ -92,7 +96,22 @@ export default function Cartera() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  async function loadClients() {
+    setLoadingClients(true)
+    try {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, client_code, first_name, last_name, phone_primary, status, created_at')
+        .eq('company_id', COMPANY_ID)
+        .order('created_at', { ascending: false })
+        .limit(1000)
+      if (error) { console.error('Clientes error:', error) }
+      else { setAllClients(data || []) }
+    } catch (e) { console.error('Clientes exception:', e) }
+    setLoadingClients(false)
+  }
+
+  useEffect(() => { load(); loadClients() }, [])
 
   useEffect(() => {
     let filtered = [...allLoans]
@@ -109,6 +128,19 @@ export default function Cartera() {
     setLoans(filtered)
     setPage(1)
   }, [allLoans, search, status])
+
+  useEffect(() => {
+    let filtered = [...allClients]
+    if (search.trim()) {
+      const s = search.toLowerCase().trim()
+      filtered = filtered.filter(c =>
+        `${c.first_name || ''} ${c.last_name || ''}`.toLowerCase().includes(s) ||
+        c.client_code?.toLowerCase().includes(s) ||
+        c.phone_primary?.toLowerCase().includes(s)
+      )
+    }
+    setClientsList(filtered)
+  }, [allClients, search])
 
   function toggleCol(key) {
     const col = ALL_COLUMNS.find(c => c.key === key)
@@ -218,24 +250,46 @@ export default function Cartera() {
         <div>
           <h2 className="text-xl font-bold text-hpa-slate-9">Vista de Cartera</h2>
           <p className="text-xs text-hpa-slate-5 mt-0.5">
-            {loading ? 'Cargando...' : `${totalFiltered} préstamos`}
+            {tab === 'prestamos'
+              ? (loading ? 'Cargando...' : `${totalFiltered} préstamos`)
+              : (loadingClients ? 'Cargando...' : `${clientsList.length} clientes`)}
             {search && ` · "${search}"`}
-            {status && ` · ${STATUS_LABELS[status] || status}`}
-            {' · Columnas personalizables'}
+            {tab === 'prestamos' && status && ` · ${STATUS_LABELS[status] || status}`}
           </p>
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Actualizar
+          <button className="btn btn-ghost btn-sm" onClick={() => { load(); loadClients() }} disabled={loading || loadingClients}>
+            <RefreshCw size={13} className={(loading || loadingClients) ? 'animate-spin' : ''} /> Actualizar
           </button>
-          <button className={`btn btn-ghost btn-sm ${showColPicker ? 'bg-hpa-slate-2' : ''}`}
-            onClick={() => setShowColPicker(!showColPicker)}>
-            <Settings2 size={13} /> Columnas
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={exportCSV} disabled={exporting}>
-            <Download size={13} /> {exporting ? 'Exportando...' : 'Exportar CSV'}
-          </button>
+          {tab === 'prestamos' && (
+            <button className={`btn btn-ghost btn-sm ${showColPicker ? 'bg-hpa-slate-2' : ''}`}
+              onClick={() => setShowColPicker(!showColPicker)}>
+              <Settings2 size={13} /> Columnas
+            </button>
+          )}
+          {tab === 'prestamos' && (
+            <button className="btn btn-ghost btn-sm" onClick={exportCSV} disabled={exporting}>
+              <Download size={13} /> {exporting ? 'Exportando...' : 'Exportar CSV'}
+            </button>
+          )}
         </div>
+      </div>
+
+      <div className="flex gap-1 border-b border-hpa-slate-2">
+        <button
+          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+            tab === 'prestamos' ? 'border-hpa-700 text-hpa-700' : 'border-transparent text-hpa-slate-5 hover:text-hpa-slate-7'
+          }`}
+          onClick={() => setTab('prestamos')}>
+          Préstamos
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+            tab === 'clientes' ? 'border-hpa-700 text-hpa-700' : 'border-transparent text-hpa-slate-5 hover:text-hpa-slate-7'
+          }`}
+          onClick={() => setTab('clientes')}>
+          Clientes ({allClients.length})
+        </button>
       </div>
 
       {showColPicker && (
@@ -288,6 +342,43 @@ export default function Cartera() {
         )}
       </div>
 
+      {tab === 'clientes' && (
+        <div className="card p-0 overflow-hidden">
+          <div className="table-wrapper overflow-x-auto max-h-[600px] overflow-y-auto">
+            <table className="table text-xs whitespace-nowrap">
+              <thead className="sticky top-0 z-10">
+                <tr>
+                  <th>Código</th><th>Cliente</th><th>Teléfono</th><th>Estado</th><th>Registrado</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingClients ? (
+                  <tr><td colSpan={6} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
+                ) : clientsList.length === 0 ? (
+                  <tr><td colSpan={6}>
+                    <Empty icon={LayoutList}
+                      title={search ? `Sin resultados para "${search}"` : 'Sin clientes'}
+                      desc={search ? 'Intenta con otro nombre o código' : 'Aún no hay clientes registrados'} />
+                  </td></tr>
+                ) : clientsList.map(c => (
+                  <tr key={c.id} className="hover:bg-hpa-slate-1">
+                    <td className="font-mono text-xs font-semibold text-hpa-700">{c.client_code}</td>
+                    <td className="font-semibold text-sm">{c.first_name} {c.last_name}</td>
+                    <td className="text-xs">{c.phone_primary || '—'}</td>
+                    <td><span className={`badge ${c.status === 'active' ? 'badge-blue' : 'badge-gray'}`}>{c.status}</span></td>
+                    <td className="text-xs text-hpa-slate-5">{fmtDate(c.created_at)}</td>
+                    <td>
+                      <a href="/loans" className="btn btn-ghost btn-sm text-hpa-700">Nuevo préstamo</a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'prestamos' && (
       <div className="card p-0 overflow-hidden">
         <div className="table-wrapper overflow-x-auto max-h-[600px] overflow-y-auto">
           <table className="table text-xs whitespace-nowrap">
@@ -332,6 +423,7 @@ export default function Cartera() {
         </div>
         <Pagination page={page} pages={totalPages} total={totalFiltered} limit={PAGE_SIZE} onChange={setPage} />
       </div>
+      )}
     </div>
   )
 }
