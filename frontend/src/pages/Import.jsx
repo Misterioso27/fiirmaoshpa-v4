@@ -345,6 +345,7 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
           type: 'person', status: 'active',
           first_name: loan.first_name, last_name: loan.last_name,
           phone_primary: loan.telefono || 'N/A',
+          address: 'No especificada (importación histórica)',
           nationality: 'DO', kyc_level: 1,
           risk_level: 'medium', assigned_to: userId, created_by: userId,
         }).select('id').single()
