@@ -48,14 +48,15 @@ async function parseExcel(file) {
   const zip    = await window.JSZip.loadAsync(arrayBuffer)
   const parser = new DOMParser()
 
-  const ssFile = zip.file('xl/sharedStrings.xml')
-  if (!ssFile) throw new Error('Archivo Excel inválido')
-  const ssXml  = await ssFile.async('text')
-  const ssDoc  = parser.parseFromString(ssXml, 'application/xml')
   const strings = []
-  ssDoc.querySelectorAll('si').forEach(si => {
-    strings.push(Array.from(si.querySelectorAll('t')).map(t => t.textContent || '').join(''))
-  })
+  const ssFile = zip.file('xl/sharedStrings.xml')
+  if (ssFile) {
+    const ssXml = await ssFile.async('text')
+    const ssDoc = parser.parseFromString(ssXml, 'application/xml')
+    ssDoc.querySelectorAll('si').forEach(si => {
+      strings.push(Array.from(si.querySelectorAll('t')).map(t => t.textContent || '').join(''))
+    })
+  }
 
   const loans = []
   const freqMap = { QUICENAL: 'biweekly', QUINCENAL: 'biweekly', SEMANAL: 'weekly', MENSUAL: 'monthly' }
@@ -69,9 +70,18 @@ async function parseExcel(file) {
     const rows     = Array.from(sheetDoc.querySelectorAll('row'))
 
     for (let ri = 1; ri < rows.length; ri++) {
-      const cells = Array.from(rows[ri].querySelectorAll('c'))
+      // Mapear celdas por su columna real (atributo r, ej. "B5") — Excel omite celdas vacías,
+      // así que el índice posicional del array se desalinea. Este era el fallo silencioso.
+      const cellMap = {}
+      Array.from(rows[ri].querySelectorAll('c')).forEach(c => {
+        const ref = c.getAttribute('r') || ''
+        const letters = ref.replace(/[0-9]/g, '')
+        let n = 0
+        for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64)
+        cellMap[n - 1] = c
+      })
       const getVal = (idx) => {
-        const c = cells[idx]
+        const c = cellMap[idx]
         if (!c) return null
         const t = c.getAttribute('t') || ''
         const v = c.querySelector('v')
@@ -244,6 +254,9 @@ export default function Import() {
     setParsing(true)
     try {
       const loans = await parseExcel(f)
+      if (!loans.length) {
+        setError('El archivo se leyó correctamente pero no se detectaron préstamos válidos. Verifica que las columnas sigan el orden esperado: A=IDC, B=Fecha, C=Cliente, D=Método, E=Cuotas, F=Monto, G=Tasa, H=Interés, I=Total, J=Retornado, N=Cap. Restante, P=Observaciones.')
+      }
       setPreview(loans)
     } catch (err) { setError('Error al leer el archivo: ' + err.message) }
     setParsing(false)
