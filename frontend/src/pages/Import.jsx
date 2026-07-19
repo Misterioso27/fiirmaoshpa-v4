@@ -78,12 +78,15 @@ function parseDateValue(v) {
   return m ? m[1] : null
 }
 
+const NAME_HEADER_WORDS = ['NOMBRE COMPLETO', 'NOMBRE', 'NOMBRES', 'CLIENTE', 'CLIENTES', 'SOLICITANTE']
 function looksLikeName(v) {
   if (!v) return false
   const s = String(v).trim()
   if (s.length < 3 || isNumeric(s)) return false
   // descarta encabezados repetidos o basura ("·", "NA", "SI", "N/A")
   if (/^(NA|N\/A|SI|NO|·)$/i.test(s)) return false
+  // descarta filas que son en realidad otro encabezado repetido dentro de la hoja
+  if (NAME_HEADER_WORDS.includes(s.toUpperCase())) return false
   return /[a-zA-ZÀ-ÿ]/.test(s)
 }
 
@@ -308,6 +311,7 @@ async function parseExcel(file, onSheetProgress) {
 
   const seen = new Set()
   const deduped = enriched.filter(l => {
+    if (l.monto_original <= 0) return false // la BD exige monto > 0; sin monto no hay préstamo que registrar
     const key = `${l.cliente}|${l.fecha_desembolso}|${l.monto_original}`
     if (seen.has(key)) return false
     seen.add(key); return true
