@@ -398,6 +398,7 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
     const loan = loans[i]
     onProgress(Math.round((i / loans.length) * 100), loan.cliente)
 
+    let clientWasCreatedNow = false
     try {
       let clientId = findExistingClient(loan.cliente)
       if (!clientId) {
@@ -417,6 +418,7 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
         })
         if (ce) throw new Error('Cliente: ' + ce.message)
         clientId = nc.id
+        clientWasCreatedNow = true
         clientIndex.push({ id: clientId, tokens: normalizeName(loan.cliente).split(' ').filter(Boolean) })
       }
 
@@ -459,7 +461,15 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
         next_payment_date:  loan.status === 'paid' ? null : primerPago.toISOString().split('T')[0],
         disbursed_by: userId,
       }).select('id').single()
-      if (le) throw new Error('Préstamo: ' + le.message)
+      if (le) {
+        // el cliente se creó pero el préstamo falló: elimina el cliente huérfano en vez de dejarlo sin datos
+        if (clientWasCreatedNow) {
+          await supabase.from('clients').delete().eq('id', clientId)
+          const idx = clientIndex.findIndex(c => c.id === clientId)
+          if (idx !== -1) clientIndex.splice(idx, 1)
+        }
+        throw new Error('Préstamo: ' + le.message)
+      }
 
       if (loan.status === 'active') {
         await supabase.from('collection_cases').insert({
