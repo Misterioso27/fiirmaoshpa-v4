@@ -759,10 +759,3 @@ export default function Cartera() {
     </div>
   )
 }
-Concluído
-Pega ambos, un solo commit, deploy. Sugerencia: usa la nueva selección múltiple para eliminar los clientes huérfanos como María Urearta (0 préstamos) antes de re-correr el import con estos fixes.
-
-
-
-
-
