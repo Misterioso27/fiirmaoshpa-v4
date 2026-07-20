@@ -65,6 +65,8 @@ export default function Cartera() {
     catch { return DEFAULT_COLS }
   })
   const [showFichaColPicker, setShowFichaColPicker] = useState(false)
+  const [fichaSelectedIds, setFichaSelectedIds] = useState(new Set())
+  const [fichaDeleting, setFichaDeleting] = useState(false)
   const [loading, setLoading]   = useState(true)
   const [page, setPage]         = useState(1)
   const [search, setSearch]     = useState('')
@@ -160,7 +162,27 @@ export default function Cartera() {
   }
 
   function closeFicha() {
-    setSelectedClient(null); setFichaLoans([]); setFichaInvestments([])
+    setSelectedClient(null); setFichaLoans([]); setFichaInvestments([]); setFichaSelectedIds(new Set())
+  }
+
+  function toggleFichaSelect(id) {
+    setFichaSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  async function deleteFichaSelected() {
+    if (!fichaSelectedIds.size) return
+    if (!window.confirm(`¿Eliminar ${fichaSelectedIds.size} préstamo(s) de ${selectedClient.first_name}? Esta acción no se puede deshacer.`)) return
+    setFichaDeleting(true)
+    try {
+      const { error } = await supabase.from('loans').delete().in('id', Array.from(fichaSelectedIds))
+      if (error) { alert('Error al eliminar: ' + error.message) }
+      else { setFichaSelectedIds(new Set()); openFicha(selectedClient) }
+    } catch (e) { alert('Error al eliminar: ' + e.message) }
+    setFichaDeleting(false)
   }
 
   function toggleFichaCol(key) {
@@ -675,6 +697,11 @@ export default function Cartera() {
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-sm font-bold text-hpa-slate-8">Préstamos ({fichaLoans.length})</p>
                       <div className="flex gap-2">
+                        {fichaSelectedIds.size > 0 && (
+                          <button className="btn btn-sm bg-red-600 text-white hover:bg-red-700" onClick={deleteFichaSelected} disabled={fichaDeleting}>
+                            <X size={12} /> {fichaDeleting ? 'Eliminando...' : `Eliminar (${fichaSelectedIds.size})`}
+                          </button>
+                        )}
                         <button className="btn btn-ghost btn-sm" onClick={() => setShowFichaColPicker(!showFichaColPicker)}>
                           <Settings2 size={12} /> Columnas
                         </button>
@@ -707,17 +734,32 @@ export default function Cartera() {
                         <table className="table text-xs whitespace-nowrap">
                           <thead>
                             <tr>
+                              <th className="w-8">
+                                <input type="checkbox"
+                                  checked={fichaLoans.length > 0 && fichaLoans.every(l => fichaSelectedIds.has(l.id))}
+                                  onChange={() => setFichaSelectedIds(prev => {
+                                    const allSel = fichaLoans.every(l => prev.has(l.id))
+                                    const next = new Set(prev)
+                                    fichaLoans.forEach(l => allSel ? next.delete(l.id) : next.add(l.id))
+                                    return next
+                                  })} />
+                              </th>
                               {ALL_COLUMNS.filter(c => fichaCols.includes(c.key)).map(col => (
                                 <th key={col.key}>{col.label}</th>
                               ))}
+                              <th className="w-10"></th>
                             </tr>
                           </thead>
                           <tbody>
                             {fichaLoans.map(loan => (
-                              <tr key={loan.id}>
+                              <tr key={loan.id} className={fichaSelectedIds.has(loan.id) ? 'bg-hpa-700/5' : ''}>
+                                <td><input type="checkbox" checked={fichaSelectedIds.has(loan.id)} onChange={() => toggleFichaSelect(loan.id)} /></td>
                                 {ALL_COLUMNS.filter(c => fichaCols.includes(c.key)).map(col => (
                                   <td key={col.key}>{renderCell({ ...loan, clients: selectedClient }, col.key)}</td>
                                 ))}
+                                <td>
+                                  <button className="btn btn-ghost btn-sm" onClick={() => openEdit(loan)} title="Editar préstamo">✏️</button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
