@@ -85,6 +85,11 @@ function looksLikePhone(v) {
   return digits.length >= 6 ? String(v).trim() : ''
 }
 
+// palabras de etiquetas/leyendas financieras que NUNCA son un nombre de persona real
+const FINANCE_LABEL_WORDS = ['MONTO SOLICITADO', 'MONTO PRESTADO', 'MONTO APROBADO', 'CUOTAS LIMITE', 'CUOTA LIMITE',
+  'LIMITE X MES', 'SALARIO', 'HISTORICO HPA', 'HISTÓRICO HPA', 'TASA DE INTERES', 'TOTAL A PAGAR', 'CAPITAL E INTERES',
+  'PLAZO', 'FRECUENCIA', 'METODO DE PAGO', 'FORMA DE PAGO', 'INGRESO MENSUAL']
+
 function looksLikeName(v) {
   if (!v) return false
   const s = String(v).trim()
@@ -93,6 +98,9 @@ function looksLikeName(v) {
   if (/^(NA|N\/A|SI|NO|·)$/i.test(s)) return false
   // descarta filas que son en realidad otro encabezado repetido dentro de la hoja
   if (NAME_HEADER_WORDS.includes(s.toUpperCase())) return false
+  // descarta etiquetas de calculadora/leyenda financiera que no son nombres de persona
+  const upper = s.toUpperCase()
+  if (FINANCE_LABEL_WORDS.some(w => upper.includes(w))) return false
   return /[a-zA-ZÀ-ÿ]/.test(s)
 }
 
@@ -446,14 +454,14 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
 
       const rateMonthlyRaw = loan.monto_original > 0
         ? (loan.interes_total / loan.monto_original) * 100 : 0
-      const rateMonthly = Math.min(Math.max(Math.round(rateMonthlyRaw * 10) / 10, 0), 999) // tope de seguridad
+      const rateMonthly = Math.min(Math.max(Math.round(rateMonthlyRaw * 10) / 10, 0), 99) // tope conservador
 
-      const capMoney = (v) => Math.min(Math.max(v || 0, 0), 99999999.99)
+      const capMoney = (v) => Math.min(Math.max(v || 0, 0), 999999.99) // tope conservador (RD$ 999,999.99)
       const { data: ld, error: le } = await supabase.from('loans').insert({
         company_id: companyId, branch_id: branchId, client_id: clientId,
         loan_code: loanCode, type: 'personal', currency: 'DOP',
-        principal: capMoney(loan.monto_original), rate_monthly: rateMonthly, rate_annual: Math.min(rateMonthly * 12, 9999),
-        term_months: Math.min(loan.frecuencia === 'biweekly' ? cuotasSeguras / 2 : cuotasSeguras, 999.9),
+        principal: capMoney(loan.monto_original), rate_monthly: rateMonthly, rate_annual: Math.min(rateMonthly * 12, 999),
+        term_months: Math.min(loan.frecuencia === 'biweekly' ? cuotasSeguras / 2 : cuotasSeguras, 99.9),
         payment_amount: capMoney(montoCuota), total_interest: capMoney(loan.interes_total),
         total_amount: capMoney(loan.total_pactado), origination_fee: 0,
         balance_principal: capMoney(loan.cap_restante), balance_interest: 0,
@@ -486,7 +494,8 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
 
       results.created++
     } catch (err) {
-      results.errors.push({ name: loan.cliente, error: err.message })
+      const detail = err.cause?.details || err.details || ''
+      results.errors.push({ name: loan.cliente, error: err.message + (detail ? ` (${detail})` : '') })
     }
   }
   return results
