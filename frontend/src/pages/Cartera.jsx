@@ -658,7 +658,12 @@ export default function Cartera() {
                 <p className="text-lg font-bold text-hpa-slate-9">{selectedClient.first_name} {selectedClient.last_name}</p>
                 <p className="text-xs text-hpa-slate-5">{selectedClient.client_code} · {selectedClient.phone_primary || 'sin teléfono'} · Ficha integral para constancia</p>
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={closeFicha}><X size={14} /></button>
+              <div className="flex gap-2">
+                <button className="btn btn-primary btn-sm" onClick={() => openFicha(selectedClient)} disabled={fichaLoading}>
+                  <RefreshCw size={12} className={fichaLoading ? 'animate-spin' : ''} /> {fichaLoading ? 'Cargando...' : 'Actualizar ficha'}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={closeFicha}><X size={14} /></button>
+              </div>
             </div>
 
             <div className="p-5 space-y-5 max-h-[75vh] overflow-y-auto">
@@ -754,3 +759,10 @@ export default function Cartera() {
     </div>
   )
 }
+Concluído
+Pega ambos, un solo commit, deploy. Sugerencia: usa la nueva selección múltiple para eliminar los clientes huérfanos como María Urearta (0 préstamos) antes de re-correr el import con estos fixes.
+
+
+
+
+
