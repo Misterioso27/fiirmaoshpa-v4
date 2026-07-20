@@ -431,29 +431,33 @@ async function importToSupabase(loans, companyId, branchId, userId, onProgress) 
       const { count: lc } = await supabase.from('loans')
         .select('*', { count: 'exact', head: true }).eq('company_id', companyId)
       const loanCode = `HPA-L-${String((lc || 0) + 1).padStart(4, '0')}`
-      const montoCuota = loan.cuotas_pactadas > 0
-        ? Math.round((loan.total_pactado / loan.cuotas_pactadas) * 100) / 100 : 0
+      // límites de seguridad: evita overflow numérico si el Excel trae una cifra mal leída
+      const cuotasSeguras = Math.min(Math.max(loan.cuotas_pactadas, 1), 120)
+      const montoCuota = cuotasSeguras > 0
+        ? Math.round((loan.total_pactado / cuotasSeguras) * 100) / 100 : 0
       const diasPeriodo = loan.frecuencia === 'weekly' ? 7 : loan.frecuencia === 'biweekly' ? 15 : 30
       const fechaBase  = new Date(loan.fecha_desembolso)
       const primerPago = new Date(fechaBase)
       if (loan.frecuencia === 'monthly') primerPago.setMonth(primerPago.getMonth() + 1)
       else primerPago.setDate(primerPago.getDate() + diasPeriodo)
       const ultimoPago = new Date(fechaBase)
-      if (loan.frecuencia === 'monthly') ultimoPago.setMonth(ultimoPago.getMonth() + loan.cuotas_pactadas)
-      else ultimoPago.setDate(ultimoPago.getDate() + diasPeriodo * loan.cuotas_pactadas)
+      if (loan.frecuencia === 'monthly') ultimoPago.setMonth(ultimoPago.getMonth() + cuotasSeguras)
+      else ultimoPago.setDate(ultimoPago.getDate() + diasPeriodo * cuotasSeguras)
 
-      const rateMonthly = loan.monto_original > 0
-        ? Math.round((loan.interes_total / loan.monto_original) * 1000) / 10 : 0
+      const rateMonthlyRaw = loan.monto_original > 0
+        ? (loan.interes_total / loan.monto_original) * 100 : 0
+      const rateMonthly = Math.min(Math.max(Math.round(rateMonthlyRaw * 10) / 10, 0), 999) // tope de seguridad
 
+      const capMoney = (v) => Math.min(Math.max(v || 0, 0), 99999999.99)
       const { data: ld, error: le } = await supabase.from('loans').insert({
         company_id: companyId, branch_id: branchId, client_id: clientId,
         loan_code: loanCode, type: 'personal', currency: 'DOP',
-        principal: loan.monto_original, rate_monthly: rateMonthly, rate_annual: rateMonthly * 12,
-        term_months: loan.frecuencia === 'biweekly' ? loan.cuotas_pactadas / 2 : loan.cuotas_pactadas,
-        payment_amount: montoCuota, total_interest: loan.interes_total,
-        total_amount: loan.total_pactado, origination_fee: 0,
-        balance_principal: loan.cap_restante, balance_interest: 0,
-        balance_penalties: 0, balance_total: loan.cap_restante,
+        principal: capMoney(loan.monto_original), rate_monthly: rateMonthly, rate_annual: Math.min(rateMonthly * 12, 9999),
+        term_months: Math.min(loan.frecuencia === 'biweekly' ? cuotasSeguras / 2 : cuotasSeguras, 999.9),
+        payment_amount: capMoney(montoCuota), total_interest: capMoney(loan.interes_total),
+        total_amount: capMoney(loan.total_pactado), origination_fee: 0,
+        balance_principal: capMoney(loan.cap_restante), balance_interest: 0,
+        balance_penalties: 0, balance_total: capMoney(loan.cap_restante),
         status: loan.status, days_overdue: 0,
         disbursed_at: loan.fecha_desembolso,
         first_payment_date: primerPago.toISOString().split('T')[0],
