@@ -308,6 +308,19 @@ export default function Loans() {
   }
 
   async function openEdit(item) {
+    if (tab === 'loans') {
+      const nuevoStatus = prompt(
+        `Editar estado del préstamo ${item.loan_code}\n(active / overdue / paid / defaulted / written_off)`,
+        item.status
+      )
+      if (nuevoStatus && nuevoStatus !== item.status) {
+        try {
+          await supabase.from('loans').update({ status: nuevoStatus }).eq('id', item.id)
+          load()
+        } catch (err) { alert(err.message) }
+      }
+      return
+    }
     setForm({ client_id: item.client_id, type: item.type, currency: item.currency || 'DOP', amount_requested: item.amount_requested, term_months: item.term_months, purpose: item.purpose, monthly_income: item.monthly_income, analyst_notes: item.analyst_notes, frequency: item.ai_analysis?.frequency || 'monthly', rate_monthly: item.ai_analysis?.rate_monthly || 10, cuotas_manual: item.ai_analysis?.total_periods || '' })
     setSelected(item); setShowModal(true)
     await fetchClients()
