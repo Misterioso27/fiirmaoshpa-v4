@@ -24,4 +24,3 @@ export default function PermissionGuard({ module, action = 'can_view', children 
 
   return children
 }
-Listo
