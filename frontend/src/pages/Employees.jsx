@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Briefcase, Plus, Search, Edit2, Save, Phone, Mail, Calendar, Upload, FileText, Eye, Trash2, X, ChevronLeft } from 'lucide-react'
+import { Briefcase, Plus, Search, Edit2, Save, Phone, Mail, Calendar, Upload, FileText, Eye, Trash2, X, ChevronLeft, UserPlus } from 'lucide-react'
 import { supabase, fmtDate } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -38,6 +38,13 @@ export default function Employees() {
   const [saving, setSaving]         = useState(false)
   const [profiles, setProfiles]     = useState([])
   const [branches, setBranches]     = useState([])
+  const [roles, setRoles]           = useState([])
+
+  // Crear usuario nuevo dentro del mismo modal
+  const [creatingUser, setCreatingUser] = useState(false)
+  const [newUserForm, setNewUserForm]   = useState({ full_name: '', email: '', password: '', role_id: '' })
+  const [newUserSaving, setNewUserSaving] = useState(false)
+  const [newUserError, setNewUserError]   = useState('')
 
   // ── Cargar lista ──────────────────────────────────────
   const load = useCallback(async () => {
@@ -162,18 +169,23 @@ export default function Employees() {
   // ── Cargar form data ──────────────────────────────────
   async function loadFormData() {
     try {
-      const [profRes, branchRes] = await Promise.all([
+      const [profRes, branchRes, roleRes] = await Promise.all([
         supabase.from('profiles').select('id, full_name, email').eq('company_id', companyId).eq('status', 'active'),
         supabase.from('branches').select('id, name, code').eq('company_id', companyId),
+        supabase.from('roles').select('id, name, code').eq('company_id', companyId),
       ])
       setProfiles(profRes.data || [])
       setBranches(branchRes.data || [])
+      setRoles(roleRes.data || [])
     } catch (e) { console.error(e) }
   }
 
   async function openNew() {
     setEditing(null)
     setForm({ position: '', hire_date: new Date().toISOString().split('T')[0], salary: '', salary_currency: 'DOP', branch_id: branchId, profile_id: '', status: 'active' })
+    setCreatingUser(false)
+    setNewUserForm({ full_name: '', email: '', password: '', role_id: '' })
+    setNewUserError('')
     setShowModal(true)
     await loadFormData()
   }
@@ -181,11 +193,48 @@ export default function Employees() {
   async function openEdit(emp) {
     setEditing(emp)
     setForm({ position: emp.position || '', hire_date: emp.hire_date || '', salary: emp.salary || '', salary_currency: emp.salary_currency || 'DOP', branch_id: emp.branch_id || branchId, profile_id: emp.profile_id || '', status: emp.status || 'active' })
+    setCreatingUser(false)
     setShowModal(true)
     await loadFormData()
   }
 
   function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
+  function nc(k, v) { setNewUserForm(f => ({ ...f, [k]: v })) }
+
+  // ── Crear usuario nuevo (correo + contraseña) vía Netlify Function ──
+  async function createNewUser() {
+    setNewUserError('')
+    if (!newUserForm.full_name || !newUserForm.email || !newUserForm.password) {
+      setNewUserError('Nombre, correo y contraseña son obligatorios'); return
+    }
+    if (newUserForm.password.length < 6) {
+      setNewUserError('La contraseña debe tener al menos 6 caracteres'); return
+    }
+    setNewUserSaving(true)
+    try {
+      const res = await fetch('/.netlify/functions/create-employee-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: newUserForm.full_name, email: newUserForm.email,
+          password: newUserForm.password, role_id: newUserForm.role_id || null,
+          company_id: companyId, branch_id: branchId,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error al crear usuario')
+
+      // agregar el nuevo perfil a la lista y seleccionarlo automáticamente
+      setProfiles(p => [...p, { id: data.id, full_name: data.full_name, email: data.email }])
+      fc('profile_id', data.id)
+      setCreatingUser(false)
+      setNewUserForm({ full_name: '', email: '', password: '', role_id: '' })
+      alert(`✅ Usuario creado. Correo: ${data.email}`)
+    } catch (err) {
+      setNewUserError(err.message)
+    }
+    setNewUserSaving(false)
+  }
 
   async function save() {
     if (!form.position) return alert('El cargo es obligatorio')
@@ -200,7 +249,7 @@ export default function Employees() {
         }).eq('id', editing.id)
         if (error) throw new Error(error.message)
       } else {
-        if (!form.profile_id) { setSaving(false); return alert('Selecciona un perfil de usuario') }
+        if (!form.profile_id) { setSaving(false); return alert('Selecciona o crea un usuario del sistema') }
         const { count } = await supabase.from('employees').select('*', { count: 'exact', head: true }).eq('company_id', companyId)
         const { error } = await supabase.from('employees').insert({
           profile_id: form.profile_id, company_id: companyId,
@@ -510,11 +559,48 @@ export default function Employees() {
         }>
         <div className="space-y-4">
           <Field label="Usuario del sistema" required>
-            <select className="select" value={form.profile_id || ''} onChange={e => fc('profile_id', e.target.value)}>
-              <option value="">Seleccionar usuario...</option>
-              {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name} — {p.email}</option>)}
-            </select>
+            <div className="flex gap-2">
+              <select className="select flex-1" value={form.profile_id || ''} onChange={e => fc('profile_id', e.target.value)}>
+                <option value="">Seleccionar usuario...</option>
+                {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name} — {p.email}</option>)}
+              </select>
+              <button type="button" className="btn btn-ghost btn-sm whitespace-nowrap"
+                onClick={() => { setCreatingUser(!creatingUser); setNewUserError('') }}>
+                <UserPlus size={13} /> {creatingUser ? 'Cancelar' : 'Crear nuevo'}
+              </button>
+            </div>
           </Field>
+
+          {creatingUser && (
+            <div className="p-4 bg-hpa-slate-1 rounded-xl border border-hpa-slate-2 space-y-3">
+              <p className="text-xs font-semibold text-hpa-slate-7">Crear cuenta de acceso nueva</p>
+              {newUserError && (
+                <div className="p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">{newUserError}</div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Nombre completo" required>
+                  <input className="input" value={newUserForm.full_name} onChange={e => nc('full_name', e.target.value)} />
+                </Field>
+                <Field label="Rol">
+                  <select className="select" value={newUserForm.role_id} onChange={e => nc('role_id', e.target.value)}>
+                    <option value="">Sin rol asignado</option>
+                    {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <Field label="Correo electrónico" required>
+                <input className="input" type="email" value={newUserForm.email} onChange={e => nc('email', e.target.value)} />
+              </Field>
+              <Field label="Contraseña temporal" required>
+                <input className="input" type="text" value={newUserForm.password} onChange={e => nc('password', e.target.value)}
+                  placeholder="Mínimo 6 caracteres" />
+              </Field>
+              <button type="button" className="btn btn-primary btn-sm w-full" onClick={createNewUser} disabled={newUserSaving}>
+                {newUserSaving ? <Spinner size={13} /> : 'Crear usuario y continuar'}
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Cargo / Posición" required>
               <input className="input" placeholder="Ej: Analista de Crédito" value={form.position || ''} onChange={e => fc('position', e.target.value)} />
