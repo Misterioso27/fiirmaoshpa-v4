@@ -221,8 +221,13 @@ export default function Employees() {
           company_id: companyId, branch_id: branchId,
         }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Error al crear usuario')
+      let data = {}
+      const rawText = await res.text()
+      try { data = JSON.parse(rawText) } catch { /* la respuesta no fue JSON válido */ }
+      if (!res.ok) {
+        const detalle = data?.error || data?.errorMessage || rawText || 'sin detalle'
+        throw new Error(`(HTTP ${res.status}) ${detalle}`)
+      }
 
       // agregar el nuevo perfil a la lista y seleccionarlo automáticamente
       setProfiles(p => [...p, { id: data.id, full_name: data.full_name, email: data.email }])
@@ -275,12 +280,27 @@ export default function Employees() {
 
   async function toggleStatus(emp) {
     const newStatus = emp.status === 'active' ? 'inactive' : 'active'
+    await setEmployeeStatus(emp, newStatus)
+  }
+
+  async function setEmployeeStatus(emp, newStatus) {
     try {
       await supabase.from('employees').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', emp.id)
       load()
       if (detail?.id === emp.id) setDetail(d => ({ ...d, status: newStatus }))
     } catch (err) { alert(err.message) }
   }
+
+  async function deleteEmployee(emp) {
+    if (!window.confirm(`¿Eliminar el registro de empleado de ${emp.profiles?.full_name || 'este empleado'}? Esta acción no se puede deshacer. (La cuenta de acceso no se elimina, solo el registro de empleado.)`)) return
+    try {
+      await supabase.from('employees').delete().eq('id', emp.id)
+      if (detail?.id === emp.id) setDetail(null)
+      load()
+    } catch (err) { alert(err.message) }
+  }
+
+  const [openMenuId, setOpenMenuId] = useState(null)
 
   const initials = (name) => name?.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase() || '?'
 
@@ -533,10 +553,25 @@ export default function Employees() {
                       {e.status === 'active' ? 'ACTIVO' : 'INACTIVO'}
                     </button>
                   </td>
-                  <td>
-                    <button className="btn btn-ghost btn-sm btn-icon" onClick={ev => { ev.stopPropagation(); openEdit(e) }}>
-                      <Edit2 size={13} />
-                    </button>
+                  <td onClick={ev => ev.stopPropagation()}>
+                    <div className="relative flex items-center gap-1">
+                      <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(e)} title="Editar">
+                        <Edit2 size={13} />
+                      </button>
+                      <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setOpenMenuId(openMenuId === e.id ? null : e.id)} title="Más acciones">
+                        ⋮
+                      </button>
+                      {openMenuId === e.id && (
+                        <div className="absolute right-0 top-8 z-20 bg-white border border-hpa-slate-2 rounded-lg shadow-card-lg py-1 w-44 text-xs">
+                          <button className="w-full text-left px-3 py-2 hover:bg-hpa-slate-1" onClick={() => { setEmployeeStatus(e, 'active'); setOpenMenuId(null) }}>✅ Activar</button>
+                          <button className="w-full text-left px-3 py-2 hover:bg-hpa-slate-1" onClick={() => { setEmployeeStatus(e, 'suspended'); setOpenMenuId(null) }}>⏸️ Suspender</button>
+                          <button className="w-full text-left px-3 py-2 hover:bg-hpa-slate-1" onClick={() => { setEmployeeStatus(e, 'inactive'); setOpenMenuId(null) }}>🗄️ Archivar</button>
+                          <button className="w-full text-left px-3 py-2 hover:bg-hpa-slate-1 text-amber-700" onClick={() => { setEmployeeStatus(e, 'terminated'); setOpenMenuId(null) }}>🚪 Marcar despedido</button>
+                          <div className="border-t border-hpa-slate-2 my-1" />
+                          <button className="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600" onClick={() => { deleteEmployee(e); setOpenMenuId(null) }}>🗑️ Eliminar registro</button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
