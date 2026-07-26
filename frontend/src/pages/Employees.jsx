@@ -55,7 +55,7 @@ export default function Employees() {
         .from('employees')
         .select(`
           id, employee_code, position, hire_date, salary,
-          salary_currency, status, profile_id,
+          salary_currency, status, profile_id, pending_name,
           profiles ( id, full_name, email, phone, avatar_url ),
           departments ( name ),
           branches ( name, code )
@@ -254,13 +254,15 @@ export default function Employees() {
         }).eq('id', editing.id)
         if (error) throw new Error(error.message)
       } else {
-        if (!form.profile_id) { setSaving(false); return alert('Selecciona o crea un usuario del sistema') }
+        // permite registrar el cargo del empleado sin vincular todavía una cuenta de acceso
+        // (profile_id queda null hasta que se cree o asigne un usuario más adelante)
         const { count } = await supabase.from('employees').select('*', { count: 'exact', head: true }).eq('company_id', companyId)
         const { error } = await supabase.from('employees').insert({
-          profile_id: form.profile_id, company_id: companyId,
+          profile_id: form.profile_id || null, company_id: companyId,
           branch_id: form.branch_id || branchId,
           employee_code: `HPA-E-${String((count || 0) + 1).padStart(4, '0')}`,
           position: form.position, hire_date: form.hire_date,
+          pending_name: form.profile_id ? null : (form.pending_name || null),
           salary: form.salary ? parseFloat(form.salary) : null,
           salary_currency: form.salary_currency || 'DOP', status: 'active',
         })
@@ -537,7 +539,10 @@ export default function Employees() {
                         }
                       </div>
                       <div>
-                        <p className="font-semibold text-hpa-slate-9">{e.profiles?.full_name || '—'}</p>
+                        <p className="font-semibold text-hpa-slate-9">
+                          {e.profiles?.full_name || e.pending_name || '—'}
+                          {!e.profile_id && <span className="ml-2 badge badge-amber text-2xs align-middle">Sin cuenta</span>}
+                        </p>
                         <p className="text-xs text-hpa-slate-5 flex items-center gap-1"><Mail size={10} />{e.profiles?.email || '—'}</p>
                       </div>
                     </div>
@@ -593,10 +598,10 @@ export default function Employees() {
           </>
         }>
         <div className="space-y-4">
-          <Field label="Usuario del sistema" required>
+          <Field label="Usuario del sistema">
             <div className="flex gap-2">
               <select className="select flex-1" value={form.profile_id || ''} onChange={e => fc('profile_id', e.target.value)}>
-                <option value="">Seleccionar usuario...</option>
+                <option value="">— Sin usuario del sistema (asignar después) —</option>
                 {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name} — {p.email}</option>)}
               </select>
               <button type="button" className="btn btn-ghost btn-sm whitespace-nowrap"
@@ -604,6 +609,10 @@ export default function Employees() {
                 <UserPlus size={13} /> {creatingUser ? 'Cancelar' : 'Crear nuevo'}
               </button>
             </div>
+            {!form.profile_id && !editing && (
+              <input className="input mt-2" placeholder="Nombre del empleado (sin cuenta de acceso todavía)"
+                value={form.pending_name || ''} onChange={e => fc('pending_name', e.target.value)} />
+            )}
           </Field>
 
           {creatingUser && (
@@ -667,3 +676,9 @@ export default function Employees() {
     </div>
   )
 }
+Concluído
+Ese es el archivo completo. Reemplaza frontend/src/pages/Employees.jsx, deploy, y prueba crear un empleado sin usuario del sistema. Si da error de columna, mándame el mensaje exacto.
+
+
+
+Quer ser notificado quando Claude responder?
