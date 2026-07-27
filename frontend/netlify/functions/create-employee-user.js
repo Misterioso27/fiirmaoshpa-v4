@@ -37,7 +37,11 @@ exports.handler = async (event) => {
       email, password, email_confirm: true,
     })
     if (authError) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Error al crear usuario: ' + authError.message }) }
+      // JSON.stringify(Error) da "{}" porque .message no es enumerable — hay que leer
+      // las propiedades explícitamente, nunca confiar en JSON.stringify de un Error
+      const detalle = authError.message || authError.msg || authError.error_description
+        || authError.name || (authError.status ? `HTTP ${authError.status} de Supabase Auth` : 'error desconocido sin mensaje')
+      return { statusCode: 400, body: JSON.stringify({ error: `Error al crear usuario en Auth: ${detalle}` }) }
     }
 
     // 2) Crear su fila en profiles
@@ -52,7 +56,8 @@ exports.handler = async (event) => {
     if (profileError) {
       // si falla el perfil, deshacer el usuario de Auth para no dejarlo huérfano
       await admin.auth.admin.deleteUser(authData.user.id)
-      return { statusCode: 400, body: JSON.stringify({ error: 'Error al crear perfil: ' + profileError.message }) }
+      const detalle = profileError.message || profileError.details || profileError.hint || profileError.code || 'error desconocido sin mensaje'
+      return { statusCode: 400, body: JSON.stringify({ error: `Error al crear perfil: ${detalle}` }) }
     }
 
     return {
@@ -63,3 +68,7 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) }
   }
 }
+Listo
+Sube esto, deploy, y prueba con algo@nada.com en vez del correo repetido. Ahora el error (si sale alguno) va a traer texto real, no {}.
+
+
