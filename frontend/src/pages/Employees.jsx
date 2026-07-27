@@ -55,7 +55,7 @@ export default function Employees() {
         .from('employees')
         .select(`
           id, employee_code, position, hire_date, salary,
-          salary_currency, status, profile_id, pending_name,
+          salary_currency, status, profile_id,
           profiles ( id, full_name, email, phone, avatar_url ),
           departments ( name ),
           branches ( name, code )
@@ -262,7 +262,6 @@ export default function Employees() {
           branch_id: form.branch_id || branchId,
           employee_code: `HPA-E-${String((count || 0) + 1).padStart(4, '0')}`,
           position: form.position, hire_date: form.hire_date,
-          pending_name: form.profile_id ? null : (form.pending_name || null),
           salary: form.salary ? parseFloat(form.salary) : null,
           salary_currency: form.salary_currency || 'DOP', status: 'active',
         })
@@ -540,7 +539,7 @@ export default function Employees() {
                       </div>
                       <div>
                         <p className="font-semibold text-hpa-slate-9">
-                          {e.profiles?.full_name || e.pending_name || '—'}
+                          {e.profiles?.full_name || e.position || '—'}
                           {!e.profile_id && <span className="ml-2 badge badge-amber text-2xs align-middle">Sin cuenta</span>}
                         </p>
                         <p className="text-xs text-hpa-slate-5 flex items-center gap-1"><Mail size={10} />{e.profiles?.email || '—'}</p>
@@ -610,8 +609,9 @@ export default function Employees() {
               </button>
             </div>
             {!form.profile_id && !editing && (
-              <input className="input mt-2" placeholder="Nombre del empleado (sin cuenta de acceso todavía)"
-                value={form.pending_name || ''} onChange={e => fc('pending_name', e.target.value)} />
+              <p className="text-2xs text-hpa-slate-4 mt-2">
+                Se registrará sin nombre visible hasta que se vincule una cuenta del sistema — el cargo sí queda guardado.
+              </p>
             )}
           </Field>
 
