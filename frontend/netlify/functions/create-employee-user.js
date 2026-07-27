@@ -37,11 +37,12 @@ exports.handler = async (event) => {
       email, password, email_confirm: true,
     })
     if (authError) {
-      // JSON.stringify(Error) da "{}" porque .message no es enumerable — hay que leer
-      // las propiedades explícitamente, nunca confiar en JSON.stringify de un Error
+      // Siempre incluir el status HTTP real de Supabase Auth — el .message a veces
+      // llega vacío o como "{}" si el cuerpo de error del servidor vino vacío
       const detalle = authError.message || authError.msg || authError.error_description
-        || authError.name || (authError.status ? `HTTP ${authError.status} de Supabase Auth` : 'error desconocido sin mensaje')
-      return { statusCode: 400, body: JSON.stringify({ error: `Error al crear usuario en Auth: ${detalle}` }) }
+        || authError.name || 'sin mensaje del servidor'
+      const status = authError.status || authError.statusCode || 'desconocido'
+      return { statusCode: 400, body: JSON.stringify({ error: `Error al crear usuario en Auth (HTTP ${status} de Supabase): ${detalle}` }) }
     }
 
     // 2) Crear su fila en profiles
