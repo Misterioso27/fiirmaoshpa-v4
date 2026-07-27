@@ -33,8 +33,11 @@ exports.handler = async (event) => {
     })
 
     // 1) Crear el usuario en Auth (confirmado directamente, sin pedirle que verifique correo)
+    // Se pasa full_name/company_id en user_metadata para que el trigger handle_new_user
+    // (que crea la fila en profiles automáticamente) use los datos correctos desde el inicio
     const { data: authData, error: authError } = await admin.auth.admin.createUser({
       email, password, email_confirm: true,
+      user_metadata: { full_name, company_id: company_id || 'a0000000-0000-4000-8000-000000000001' },
     })
     if (authError) {
       // Siempre incluir el status HTTP real de Supabase Auth — el .message a veces
@@ -45,20 +48,17 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: `Error al crear usuario en Auth (HTTP ${status} de Supabase): ${detalle}` }) }
     }
 
-    // 2) Crear su fila en profiles
-    const { error: profileError } = await admin.from('profiles').insert({
-      id: authData.user.id,
-      full_name, email,
-      company_id: company_id || 'a0000000-0000-4000-8000-000000000001',
-      branch_id:  branch_id  || 'b0000000-0000-4000-8000-000000000001',
-      role_id:    role_id || null,
-      status: 'active',
-    })
+    // 2) El trigger handle_new_user ya creó la fila base en profiles al insertar en auth.users.
+    // Aquí solo completamos branch_id y role_id, que el trigger no conoce.
+    const { error: profileError } = await admin.from('profiles').update({
+      branch_id: branch_id || 'b0000000-0000-4000-8000-000000000001',
+      role_id:   role_id || null,
+    }).eq('id', authData.user.id)
     if (profileError) {
-      // si falla el perfil, deshacer el usuario de Auth para no dejarlo huérfano
+      // si falla completar el perfil, deshacer el usuario de Auth para no dejarlo huérfano
       await admin.auth.admin.deleteUser(authData.user.id)
       const detalle = profileError.message || profileError.details || profileError.hint || profileError.code || 'error desconocido sin mensaje'
-      return { statusCode: 400, body: JSON.stringify({ error: `Error al crear perfil: ${detalle}` }) }
+      return { statusCode: 400, body: JSON.stringify({ error: `Error al completar perfil: ${detalle}` }) }
     }
 
     return {
