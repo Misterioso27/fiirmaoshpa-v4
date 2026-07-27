@@ -68,7 +68,3 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) }
   }
 }
-Listo
-Sube esto, deploy, y prueba con algo@nada.com en vez del correo repetido. Ahora el error (si sale alguno) va a traer texto real, no {}.
-
-
