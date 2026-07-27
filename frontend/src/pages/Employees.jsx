@@ -676,9 +676,3 @@ export default function Employees() {
     </div>
   )
 }
-Concluído
-Ese es el archivo completo. Reemplaza frontend/src/pages/Employees.jsx, deploy, y prueba crear un empleado sin usuario del sistema. Si da error de columna, mándame el mensaje exacto.
-
-
-
-Quer ser notificado quando Claude responder?
