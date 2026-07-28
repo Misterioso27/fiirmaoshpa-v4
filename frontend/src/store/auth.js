@@ -127,6 +127,14 @@ const useAuthStore = create((set, get) => ({
         permissions = perms || []
       }
 
+      // Permisos individuales del empleado — anulan al del cargo cuando existen para ese módulo
+      let overrides = []
+      const { data: overridesData } = await supabase
+        .from('profile_permissions')
+        .select('module, can_view, can_create, can_edit, can_delete, can_approve, can_export, can_sign, can_authorize')
+        .eq('profile_id', uid)
+      overrides = overridesData || []
+
       // Cargar preferencias del usuario desde Supabase
       let userPrefs = { ...DEFAULT_PREFS }
       const { data: prefsData } = await supabase
@@ -151,6 +159,7 @@ const useAuthStore = create((set, get) => ({
         branch,
         company,
         permissions,
+        overrides,
       }
 
       localStorage.setItem('hpa_token', authData.session.access_token)
@@ -235,6 +244,9 @@ const useAuthStore = create((set, get) => ({
     const { user } = get()
     if (!user) return false
     if (user.role?.code === 'super_admin') return true
+    // el permiso individual del empleado anula al del cargo, cuando existe para ese módulo
+    const override = user.overrides?.find(o => o.module === module)
+    if (override) return !!override[action]
     const perm = user.permissions?.find(p => p.module === module)
     return perm?.[action] || false
   },
@@ -251,5 +263,3 @@ const useAuthStore = create((set, get) => ({
     return i18n[lang]?.[key] || i18n.es[key] || key
   },
 }))
-
-export default useAuthStore
