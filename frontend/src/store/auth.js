@@ -263,3 +263,5 @@ const useAuthStore = create((set, get) => ({
     return i18n[lang]?.[key] || i18n.es[key] || key
   },
 }))
+
+export default useAuthStore
