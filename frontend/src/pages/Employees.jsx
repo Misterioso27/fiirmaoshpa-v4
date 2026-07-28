@@ -4,6 +4,22 @@ import { supabase, fmtDate } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
+const MODULES = [
+  { key: 'dashboard',   label: 'Dashboard' },
+  { key: 'clients',     label: 'Clientes' },
+  { key: 'investments', label: 'Inversiones' },
+  { key: 'loans',       label: 'Préstamos' },
+  { key: 'collections', label: 'Cobranza' },
+  { key: 'cash',        label: 'Caja' },
+  { key: 'employees',   label: 'Empleados' },
+  { key: 'ai',          label: 'FIIRMAOSHPA AI' },
+  { key: 'reports',     label: 'Reportes' },
+  { key: 'audit',       label: 'Auditoría' },
+  { key: 'settings',    label: 'Configuración' },
+  { key: 'cartera',     label: 'Cartera' },
+  { key: 'import',      label: 'Importar' },
+]
+
 const DOC_TYPES = [
   { value: 'cedula',    label: '🪪 Cédula de Identidad'  },
   { value: 'pasaporte', label: '📘 Pasaporte'             },
@@ -105,11 +121,39 @@ export default function Employees() {
     setLoadingDocs(false)
   }
 
+  // Permisos individuales del empleado
+  const [permOverrides, setPermOverrides] = useState({})
+  const [savingPerm, setSavingPerm] = useState('')
+
+  async function loadPermissions(emp) {
+    if (!emp.profile_id) { setPermOverrides({}); return }
+    try {
+      const { data } = await supabase.from('profile_permissions')
+        .select('module, can_view').eq('profile_id', emp.profile_id)
+      const map = {}
+      ;(data || []).forEach(o => { map[o.module] = o.can_view })
+      setPermOverrides(map)
+    } catch { setPermOverrides({}) }
+  }
+
+  async function togglePermission(emp, moduleKey, current) {
+    if (!emp.profile_id) { alert('Este empleado aún no tiene una cuenta de acceso vinculada.'); return }
+    setSavingPerm(moduleKey)
+    try {
+      await supabase.from('profile_permissions').upsert({
+        profile_id: emp.profile_id, module: moduleKey, can_view: !current,
+      }, { onConflict: 'profile_id,module' })
+      setPermOverrides(m => ({ ...m, [moduleKey]: !current }))
+    } catch (err) { alert(err.message) }
+    setSavingPerm('')
+  }
+
   // ── Abrir detalle ─────────────────────────────────────
   async function openDetail(emp) {
     setDetail(emp)
     setDocType('cedula')
     await loadDocs(emp)
+    await loadPermissions(emp)
   }
 
   // ── Subir foto de perfil ──────────────────────────────
@@ -373,6 +417,36 @@ export default function Employees() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Permisos individuales */}
+          <div className="lg:col-span-2 card space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-hpa-slate-9">Permisos de acceso</h3>
+              <p className="text-xs text-hpa-slate-5">
+                {emp.profile_id
+                  ? 'Habilita los módulos que este empleado puede ver, sin importar su cargo. Lo que no marques aquí usa el permiso por defecto de su rol.'
+                  : 'Este empleado no tiene cuenta de acceso vinculada — no se pueden asignar permisos todavía.'}
+              </p>
+            </div>
+            {emp.profile_id && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {MODULES.map(m => {
+                  const active = !!permOverrides[m.key]
+                  return (
+                    <button key={m.key} type="button"
+                      onClick={() => togglePermission(emp, m.key, active)}
+                      disabled={savingPerm === m.key}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                        active ? 'border-hpa-700 bg-hpa-700/10 text-hpa-700' : 'border-hpa-slate-2 text-hpa-slate-5 hover:border-hpa-slate-3'
+                      }`}>
+                      {m.label}
+                      {savingPerm === m.key ? <Spinner size={12} /> : (active ? '✅' : '—')}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {/* Documentos */}
