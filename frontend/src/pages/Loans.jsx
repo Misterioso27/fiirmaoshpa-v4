@@ -842,3 +842,73 @@ export default function Loans() {
             <div className="p-4 bg-hpa-slate-1 rounded-xl">
               <p className="font-bold text-hpa-slate-9">{disbursalItem.clients?.first_name} {disbursalItem.clients?.last_name}</p>
               <p className="text-xs text-hpa-slate-5 mb-3">{disbursalItem.application_code} · {disbursalItem.purpose}</p>
+              <div className="grid grid-cols-3 gap-3 text-center text-xs">
+                <div><p className="text-hpa-slate-5">Monto Aprobado</p><p className="font-bold text-hpa-slate-9 font-numeric text-sm">{fmtCurrency(disbursalItem.approved_amount || disbursalItem.amount_requested, disbursalItem.currency)}</p></div>
+                <div><p className="text-hpa-slate-5">Cuotas</p><p className="font-bold text-hpa-slate-9">{disbursalItem.ai_analysis?.total_periods || '—'}</p></div>
+                <div><p className="text-hpa-slate-5">Frecuencia</p><p className="font-bold text-hpa-slate-9">{tipoLabel[disbursalItem.ai_analysis?.frequency] || '—'}</p></div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Fecha de Desembolso" required>
+                <input className="input" type="date" value={disbursalForm.disbursement_date || ''} onChange={e => dfc('disbursement_date', e.target.value)} />
+              </Field>
+              <Field label="Moneda del Desembolso">
+                <select className="select" value={disbursalForm.currency || 'DOP'} onChange={e => dfc('currency', e.target.value)}>
+                  {Object.entries(CURRENCIES).map(([k, v]) => <option key={k} value={k}>{v.flag} {k} — {v.label}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label="Método de Desembolso" required>
+              <div className="grid grid-cols-2 gap-2">
+                {methodOptions.map(m => (
+                  <div key={m.value}
+                    className={`p-3 rounded-lg border-2 cursor-pointer text-sm font-medium transition-all ${disbursalForm.method === m.value ? 'border-hpa-700 bg-hpa-700/5 text-hpa-700' : 'border-hpa-slate-2 hover:border-hpa-slate-3'}`}
+                    onClick={() => dfc('method', m.value)}>
+                    {m.label}
+                  </div>
+                ))}
+              </div>
+            </Field>
+            {disbursalForm.method !== 'cash' && (
+              <Field label="Cuenta Bancaria de Origen">
+                {bankAccounts.length === 0
+                  ? <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">⚠️ No hay cuentas bancarias registradas.</div>
+                  : <div className="space-y-2">
+                      {bankAccounts.map(acc => (
+                        <div key={acc.id}
+                          className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${disbursalForm.bank_account_id === acc.id ? 'border-hpa-700 bg-hpa-700/5' : 'border-hpa-slate-2 hover:border-hpa-slate-3'}`}
+                          onClick={() => dfc('bank_account_id', acc.id)}>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-xs font-bold text-hpa-slate-9">{acc.label}</p>
+                              <p className="text-xs text-hpa-slate-5">{acc.bank_name} · {acc.account_number}</p>
+                            </div>
+                            <span className="badge badge-blue">{acc.currency}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                }
+              </Field>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Referencia / Número de Operación">
+                <input className="input" placeholder="Ej: TRF-20260712..." value={disbursalForm.reference || ''} onChange={e => dfc('reference', e.target.value)} />
+              </Field>
+              <Field label="Notas">
+                <input className="input" placeholder="Observaciones opcionales..." value={disbursalForm.notes || ''} onChange={e => dfc('notes', e.target.value)} />
+              </Field>
+            </div>
+            {disbursalForm.method === 'cash' && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
+                <Building2 size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-blue-800">El desembolso en efectivo se registrará automáticamente como egreso en la caja activa.</p>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+      )}
+    </div>
+  )
+}
