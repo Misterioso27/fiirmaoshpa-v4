@@ -13,6 +13,14 @@ const CURRENCIES = {
   GBP: { symbol: '£',   label: 'Libra Esterlina', flag: '🇬🇧' },
 }
 
+// ── Representante legal fijo de la empresa (pagarés) ────────
+const REPRESENTANTE_LEGAL = {
+  nombre: 'CÉSAR AUGUSTO DE LOS SANTOS PEREZ',
+  cargo: 'Gerente de Operaciones / CEO / Co-Propietario',
+  cedula: '224-0001237-7',
+  direccion: '_______________________________________________', // TODO: confirmar dirección exacta de oficina
+}
+
 function fmtCurrency(amount, currency = 'DOP') {
   const c = CURRENCIES[currency] || CURRENCIES.DOP
   return `${c.symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -105,7 +113,19 @@ function numeroALetras(n) {
   return { str: intToStr(entero), cents, MESES, DIAS_ORD }
 }
 
-function generarPagare(item) {
+// ── Resuelve el nombre de quien gestionó el caso (aprobó, o si no, quien creó la solicitud) ──
+async function resolverGestor(item) {
+  const gestorId = item.approved_by || item.created_by
+  if (!gestorId) return null
+  try {
+    const { data } = await supabase.from('profiles').select('full_name').eq('id', gestorId).maybeSingle()
+    return data?.full_name || null
+  } catch { return null }
+}
+
+async function generarPagare(item) {
+  const gestorNombre = await resolverGestor(item)
+
   const ai      = item.ai_analysis || {}
   const cliente = `${item.clients?.first_name || ''} ${item.clients?.last_name || ''}`.trim().toUpperCase()
   const cedula  = item.clients?.national_id || '_______________'
@@ -170,6 +190,7 @@ function generarPagare(item) {
   .cuerpo p { margin-bottom: 16px; }
   .ref-box { border: 1px solid #ccc; padding: 8px 14px; font-size: 11px; color: #555; margin-bottom: 20px; display: flex; justify-content: space-between; }
   .gold-sep { border: none; border-top: 2px solid #C9A84C; margin: 20px 0; }
+  .gestor-box { font-size: 10px; color: #777; text-align: right; margin-top: 4px; }
   .firma-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; margin-top: 30px; }
   .firma-box { text-align: center; }
   .firma-linea { border-top: 1px solid #000; padding-top: 8px; margin-top: 70px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -195,11 +216,12 @@ function generarPagare(item) {
     <span>Fecha: <strong>${fmtFechaCorta(hoy)}</strong></span>
     <span>Moneda: <strong>${currency}</strong></span>
   </div>
+  ${gestorNombre ? `<div class="gestor-box">Gestionado por: ${gestorNombre}</div>` : ''}
   <hr class="gold-sep">
   <div class="cuerpo">
     <p>En la ciudad de <strong>Santo Domingo, Distrito Nacional, República Dominicana</strong>, a los <strong>${DIAS_ORD[diaHoy]} (${diaHoy})</strong> días del mes de <strong>${MESES[mesHoy].charAt(0) + MESES[mesHoy].slice(1).toLowerCase()}</strong> del año <strong>${aniosTexto[anioHoy] || anioHoy} (${anioHoy})</strong>, por ante mí, <strong>DOCTOR GERIS RODOLFO LEÓN ENCARNACIÓN</strong>, Abogado Notario Público, de los del Número para el Distrito Nacional, miembro activo del Colegio de Notarios de la República Dominicana, con matrícula Número cinco mil doscientos cuatro (5204), dominicano, mayor de edad, casado, portador de la Cédula de Identidad y Electoral Número Cero, uno, uno, guión, cero, cero, cero, tres, dos, nueve, cero, guión, uno (011-0003290-1), con estudio profesional abierto en la calle Juan Enrique Dunant Número (154), Miraflores, Santo Domingo, Distrito Nacional, República Dominicana; asistido de los testigos que al final del presente acto se mencionan,</p>
     <p><strong>COMPARECIÓ</strong> libre y voluntariamente el/la <strong>SEÑOR/A ${cliente}</strong>, dominicano/a, mayor de edad, portador/a de la Cédula de Identidad y Electoral Número <strong>${cedula}</strong>, con domicilio y residencia declarados en <strong>${domicilio}</strong>; y me ha declarado dicho compareciente lo siguiente:</p>
-    <p><strong>Que él/ella se declara DEUDOR/A de la Financiera e Inversiones Irmaos HPA SRL</strong>, representada legalmente por la señora <strong>ALTAGRACIA RODRÍGUEZ CRUCETA</strong>, dominicana, mayor de edad, portadora de la Cédula de Identidad y Electoral Número cero, cero, uno, guión, cero, cuatro, seis, cuatro, siete, cinco, dos, guión, cuatro (001-0464752-4), con domicilio en la C. Isabela (C. Hermanas Mirabal) #47, Esquina, C. Enriquillo, Sector D.M. La Caleta, Campo Lindo, Municipio Boca Chica, Provincia Santo Domingo, República Dominicana, por la suma de <strong>${montoStr} PESOS DOMINICANOS CON ${cents}/100 (${sym}${montoFormateado})</strong>, suma esta que será pagada en un período de <strong>${cuotasTexto} (${cuotas}) cuotas ${freqLabel}</strong>, comenzando a partir del día <strong>${fmtFechaLarga(fechaPrimer)}</strong> y concluyendo el <strong>${fmtFechaLarga(fechaUltimo)}</strong>.</p>
+    <p><strong>Que él/ella se declara DEUDOR/A de la Financiera e Inversiones Irmaos HPA SRL</strong>, representada legalmente por el señor <strong>${REPRESENTANTE_LEGAL.nombre}</strong>, ${REPRESENTANTE_LEGAL.cargo}, dominicano, mayor de edad, portador de la Cédula de Identidad y Electoral Número <strong>${REPRESENTANTE_LEGAL.cedula}</strong>, con domicilio en <strong>${REPRESENTANTE_LEGAL.direccion}</strong>, por la suma de <strong>${montoStr} PESOS DOMINICANOS CON ${cents}/100 (${sym}${montoFormateado})</strong>, suma esta que será pagada en un período de <strong>${cuotasTexto} (${cuotas}) cuotas ${freqLabel}</strong>, comenzando a partir del día <strong>${fmtFechaLarga(fechaPrimer)}</strong> y concluyendo el <strong>${fmtFechaLarga(fechaUltimo)}</strong>.</p>
     <p>El compareciente me ha manifestado que acepta darle al presente acto la fuerza ejecutoria prevista en el artículo 545 (quinientos cuarenta y cinco) del Código de Procedimiento Civil Dominicano, y que queda expresamente acordado que si por cualquier circunstancia el compareciente (Deudor/a) no pagare en la fecha convenida al vencimiento de las cuotas, desde la fecha del retraso devengará una mora al tipo del <strong>Cuarenta y cinco por ciento (45%) mensual</strong>, más comisiones y gastos, hasta que quede totalmente liquidada la deuda, en cuyo caso la <strong>Financiera e Inversiones Irmaos HPA SRL</strong> (en calidad de acreedor) exigirá la totalidad del crédito adeudado, más las moras correspondientes al tiempo transcurrido posterior al término de este pagaré.</p>
     <p>Asimismo, el compareciente expresa que para el fiel cumplimiento de lo declarado y aceptado en el presente acto, afecta todos sus bienes muebles e inmuebles, presentes y futuros.</p>
     <p><strong>HECHO</strong> en mi estudio el día, mes y año indicados en cabeza del presente acto, en presencia de los testigos Señores <strong>BERNARDO ALEXANDER LOPEZ BAEZ</strong> y <strong>ALTAGRACIA RODRÍGUEZ CRUCETA</strong>, dominicanos, mayores de edad, solteros, portadores de las Cédulas de Identidad y Electorales Números Cero, Cero, Uno, Guión, Uno, cinco, Tres, Dos, Nueve, Seis, Nueve, Guión, Cero (001-1532969-0) y Cuatro, Cero, Dos, Guión, Dos, Cuatro, Cinco, Seis, Cuatro, Dos, Uno, Guión, Siete (402-2456421-7), respectivamente, domiciliados en la Calle Bonaire Número Doscientos Cuarenta y Tres (243), Residencial Ana Iris I, Apartamento Número Uno, Letra A (1-A) el primero, y Calle Bonaire, Número 243, Residencial Ana Iris I, Casa Número 1, ambos en el sector Alma Rosa I, Municipio Santo Domingo Este, Provincia Santo Domingo, República Dominicana; testigos instrumentales requeridos al efecto, libres de todas tachas y excepciones que establece la ley, de todo lo cual he redactado el presente pagaré, que ha sido leído en alta voz al compareciente y a los testigos, quienes lo han aprobado y firmado por ante mí y junto conmigo, de todo lo cual doy fe y verdadero testimonio de manera expresa, formal y solemne, levantando el presente pagaré notarial.</p>
@@ -226,6 +248,7 @@ export default function Loans() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   const branchId  = user?.branch?.id  || 'b0000000-0000-4000-8000-000000000001'
+  const isClient  = user?.role?.code === 'client'
 
   const [tab, setTab]                               = useState('applications')
   const [items, setItems]                           = useState([])
@@ -251,6 +274,20 @@ export default function Loans() {
   const [showSchedule, setShowSchedule] = useState(false)
   const [uploading, setUploading]       = useState(false)
   const [idDocUrl, setIdDocUrl]         = useState('')
+  const [myClientId, setMyClientId]     = useState(null)
+  const [resolvingClient, setResolvingClient] = useState(isClient)
+
+  // ── Si el usuario es rol Cliente, resuelve su client_id una sola vez ──
+  useEffect(() => {
+    if (!isClient || !user?.id) { setResolvingClient(false); return }
+    (async () => {
+      try {
+        const c = await db.getClientByUserId(user.id)
+        setMyClientId(c?.id || null)
+      } catch (e) { console.error(e) }
+      setResolvingClient(false)
+    })()
+  }, [isClient, user?.id])
 
   useEffect(() => {
     setAnalisis(calcularEstructura({
@@ -268,18 +305,20 @@ export default function Loans() {
 
   const load = useCallback(async () => {
     if (!companyId) return
+    if (isClient && resolvingClient) return
+    if (isClient && !myClientId) { setItems([]); setPagination({}); setLoading(false); return }
     setLoading(true)
     try {
       if (tab === 'applications') {
-        const data = await db.getLoanApplications({ page, limit: 20, status, companyId })
+        const data = await db.getLoanApplications({ page, limit: 20, status, companyId, clientId: isClient ? myClientId : null })
         setItems(data.applications || []); setPagination(data.pagination || {})
       } else {
-        const data = await db.getLoans({ page, limit: 20, status, companyId })
+        const data = await db.getLoans({ page, limit: 20, status, companyId, clientId: isClient ? myClientId : null })
         setItems(data.loans || []); setPagination(data.pagination || {})
       }
     } catch (e) { console.error(e) }
     setLoading(false)
-  }, [tab, page, status, companyId])
+  }, [tab, page, status, companyId, isClient, myClientId, resolvingClient])
 
   useEffect(() => { load() }, [load])
 
@@ -302,12 +341,14 @@ export default function Loans() {
   }
 
   async function openNew() {
+    if (isClient) return // seguridad extra — no debería llegar aquí porque el botón está oculto
     setForm({ type: 'personal', currency: 'DOP', frequency: 'monthly', term_months: 3, rate_monthly: 10, cuotas_manual: '' })
     setSelected(null); setIdDocUrl(''); setShowSchedule(false); setShowModal(true)
     await fetchClients()
   }
 
   async function openEdit(item) {
+    if (isClient) return
     if (tab === 'loans') {
       const nuevoStatus = prompt(
         `Editar estado del préstamo ${item.loan_code}\n(active / overdue / paid / defaulted / written_off)`,
@@ -327,12 +368,14 @@ export default function Loans() {
   }
 
   function openApprove(item) {
+    if (isClient) return
     setApproveItem(item)
     setApproveForm({ approved_amount: item.amount_requested, approved_rate: item.ai_analysis?.rate_monthly || 10, approved_term: item.term_months, frequency: item.ai_analysis?.frequency || 'monthly', currency: item.currency || 'DOP', cuotas_manual: item.ai_analysis?.total_periods || '', disbursement_date: new Date().toISOString().split('T')[0], conditions: '' })
     setShowApproveModal(true)
   }
 
   async function openDisbursal(item) {
+    if (isClient) return
     setDisbursalItem(item)
     setDisbursalForm({ method: 'cash', currency: item.currency || item.ai_analysis?.currency || 'DOP', bank_account_id: '', reference: '', notes: '', disbursement_date: new Date().toISOString().split('T')[0] })
     setShowDisbursalModal(true)
@@ -354,6 +397,7 @@ export default function Loans() {
   }
 
   async function save() {
+    if (isClient) return
     if (analisis.error) return
     setSaving(true)
     try {
@@ -379,6 +423,7 @@ export default function Loans() {
   }
 
   async function approveApplication() {
+    if (isClient) return
     if (!approveItem || approveAnalisis.error) return
     setApproveSaving(true)
     try {
@@ -395,6 +440,7 @@ export default function Loans() {
   }
 
   async function executeDisbursal() {
+    if (isClient) return
     if (!disbursalItem) return
     setDisbursalSaving(true)
     try {
@@ -455,6 +501,7 @@ export default function Loans() {
   }
 
   async function rejectApplication(item) {
+    if (isClient) return
     if (!confirm(`¿Rechazar la solicitud ${item.application_code}?`)) return
     try {
       await supabase.from('loan_applications').update({ status: 'rejected', rejected_by: user.id, rejected_at: new Date().toISOString(), rejection_reason: 'Rechazada por el analista' }).eq('id', item.id)
@@ -477,9 +524,11 @@ export default function Loans() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-hpa-slate-9">Préstamos</h2>
-          <p className="text-xs text-hpa-slate-5 mt-0.5">{pagination.total || 0} registros en cartera</p>
+          <p className="text-xs text-hpa-slate-5 mt-0.5">{pagination.total || 0} registros{isClient ? ' propios' : ' en cartera'}</p>
         </div>
-        <button className="btn btn-primary" onClick={openNew}><Plus size={15} /> Nueva Solicitud</button>
+        {!isClient && (
+          <button className="btn btn-primary" onClick={openNew}><Plus size={15} /> Nueva Solicitud</button>
+        )}
       </div>
 
       <div className="card p-0">
@@ -499,10 +548,10 @@ export default function Loans() {
               <tr><th>Código</th><th>Cliente</th><th>Monto</th><th>Cuotas</th><th>Propósito</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr>
             </thead>
             <tbody>
-              {loading ? (
+              {(loading || (isClient && resolvingClient)) ? (
                 <tr><td colSpan={8} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
               ) : items.length === 0 ? (
-                <tr><td colSpan={8}><Empty icon={CreditCard} title="Sin registros" desc="Registra la primera solicitud de préstamo" /></td></tr>
+                <tr><td colSpan={8}><Empty icon={CreditCard} title="Sin registros" desc={isClient ? 'Aún no tienes préstamos o solicitudes registradas' : 'Registra la primera solicitud de préstamo'} /></td></tr>
               ) : items.map(item => {
                 const ai = item.ai_analysis || {}
                 return (
@@ -524,33 +573,37 @@ export default function Loans() {
                     <td><StatusBadge status={item.status} /></td>
                     <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
                     <td>
-                      <div className="flex gap-1 items-center flex-wrap">
-                        {(item.status === 'submitted' || item.status === 'in_review') && (
-                          <>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => openEdit(item)}><Edit2 size={13} /></button>
-                            <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar" onClick={() => openApprove(item)}><CheckSquare size={13} /></button>
-                            <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar" onClick={() => rejectApplication(item)}><XSquare size={13} /></button>
-                          </>
-                        )}
-                        {item.status === 'approved' && (
-                          <>
-                            <button
-                              className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
-                              title="Generar Pagaré Notarial"
-                              onClick={() => generarPagare(item)}
-                            >
-                              📄 Pagaré
-                            </button>
-                            <button className="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100" onClick={() => openDisbursal(item)}>
-                              <DollarSign size={13} /><span className="ml-1 text-xs font-semibold">Desembolsar</span>
-                            </button>
+                      {isClient ? (
+                        <span className="text-xs text-hpa-slate-4">—</span>
+                      ) : (
+                        <div className="flex gap-1 items-center flex-wrap">
+                          {(item.status === 'submitted' || item.status === 'in_review') && (
+                            <>
+                              <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => openEdit(item)}><Edit2 size={13} /></button>
+                              <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar" onClick={() => openApprove(item)}><CheckSquare size={13} /></button>
+                              <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar" onClick={() => rejectApplication(item)}><XSquare size={13} /></button>
+                            </>
+                          )}
+                          {item.status === 'approved' && (
+                            <>
+                              <button
+                                className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
+                                title="Generar Pagaré Notarial"
+                                onClick={() => generarPagare(item)}
+                              >
+                                📄 Pagaré
+                              </button>
+                              <button className="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100" onClick={() => openDisbursal(item)}>
+                                <DollarSign size={13} /><span className="ml-1 text-xs font-semibold">Desembolsar</span>
+                              </button>
+                              <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(item)}><Edit2 size={13} /></button>
+                            </>
+                          )}
+                          {tab === 'loans' && (
                             <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(item)}><Edit2 size={13} /></button>
-                          </>
-                        )}
-                        {tab === 'loans' && (
-                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(item)}><Edit2 size={13} /></button>
-                        )}
-                      </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )
@@ -562,6 +615,7 @@ export default function Loans() {
       </div>
 
       {/* MODAL NUEVA / EDITAR SOLICITUD */}
+      {!isClient && (
       <Modal open={showModal} onClose={() => { setShowModal(false); setSelected(null) }}
         title={selected ? 'Editar Solicitud' : 'Nueva Solicitud de Préstamo'} size="xl"
         footer={
@@ -691,8 +745,10 @@ export default function Loans() {
           </Field>
         </div>
       </Modal>
+      )}
 
       {/* MODAL APROBACIÓN */}
+      {!isClient && (
       <Modal open={showApproveModal} onClose={() => { setShowApproveModal(false); setApproveItem(null) }}
         title="✅ Aprobar Solicitud" size="lg"
         footer={
@@ -767,8 +823,10 @@ export default function Loans() {
           </div>
         )}
       </Modal>
+      )}
 
       {/* MODAL DESEMBOLSO */}
+      {!isClient && (
       <Modal open={showDisbursalModal} onClose={() => { setShowDisbursalModal(false); setDisbursalItem(null) }}
         title="💰 Desembolsar Préstamo" size="lg"
         footer={
@@ -784,72 +842,3 @@ export default function Loans() {
             <div className="p-4 bg-hpa-slate-1 rounded-xl">
               <p className="font-bold text-hpa-slate-9">{disbursalItem.clients?.first_name} {disbursalItem.clients?.last_name}</p>
               <p className="text-xs text-hpa-slate-5 mb-3">{disbursalItem.application_code} · {disbursalItem.purpose}</p>
-              <div className="grid grid-cols-3 gap-3 text-center text-xs">
-                <div><p className="text-hpa-slate-5">Monto Aprobado</p><p className="font-bold text-hpa-slate-9 font-numeric text-sm">{fmtCurrency(disbursalItem.approved_amount || disbursalItem.amount_requested, disbursalItem.currency)}</p></div>
-                <div><p className="text-hpa-slate-5">Cuotas</p><p className="font-bold text-hpa-slate-9">{disbursalItem.ai_analysis?.total_periods || '—'}</p></div>
-                <div><p className="text-hpa-slate-5">Frecuencia</p><p className="font-bold text-hpa-slate-9">{tipoLabel[disbursalItem.ai_analysis?.frequency] || '—'}</p></div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Fecha de Desembolso" required>
-                <input className="input" type="date" value={disbursalForm.disbursement_date || ''} onChange={e => dfc('disbursement_date', e.target.value)} />
-              </Field>
-              <Field label="Moneda del Desembolso">
-                <select className="select" value={disbursalForm.currency || 'DOP'} onChange={e => dfc('currency', e.target.value)}>
-                  {Object.entries(CURRENCIES).map(([k, v]) => <option key={k} value={k}>{v.flag} {k} — {v.label}</option>)}
-                </select>
-              </Field>
-            </div>
-            <Field label="Método de Desembolso" required>
-              <div className="grid grid-cols-2 gap-2">
-                {methodOptions.map(m => (
-                  <div key={m.value}
-                    className={`p-3 rounded-lg border-2 cursor-pointer text-sm font-medium transition-all ${disbursalForm.method === m.value ? 'border-hpa-700 bg-hpa-700/5 text-hpa-700' : 'border-hpa-slate-2 hover:border-hpa-slate-3'}`}
-                    onClick={() => dfc('method', m.value)}>
-                    {m.label}
-                  </div>
-                ))}
-              </div>
-            </Field>
-            {disbursalForm.method !== 'cash' && (
-              <Field label="Cuenta Bancaria de Origen">
-                {bankAccounts.length === 0
-                  ? <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">⚠️ No hay cuentas bancarias registradas.</div>
-                  : <div className="space-y-2">
-                      {bankAccounts.map(acc => (
-                        <div key={acc.id}
-                          className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${disbursalForm.bank_account_id === acc.id ? 'border-hpa-700 bg-hpa-700/5' : 'border-hpa-slate-2 hover:border-hpa-slate-3'}`}
-                          onClick={() => dfc('bank_account_id', acc.id)}>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-xs font-bold text-hpa-slate-9">{acc.label}</p>
-                              <p className="text-xs text-hpa-slate-5">{acc.bank_name} · {acc.account_number}</p>
-                            </div>
-                            <span className="badge badge-blue">{acc.currency}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                }
-              </Field>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Referencia / Número de Operación">
-                <input className="input" placeholder="Ej: TRF-20260712..." value={disbursalForm.reference || ''} onChange={e => dfc('reference', e.target.value)} />
-              </Field>
-              <Field label="Notas">
-                <input className="input" placeholder="Observaciones opcionales..." value={disbursalForm.notes || ''} onChange={e => dfc('notes', e.target.value)} />
-              </Field>
-            </div>
-            {disbursalForm.method === 'cash' && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
-                <Building2 size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-blue-800">El desembolso en efectivo se registrará automáticamente como egreso en la caja activa.</p>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
-    </div>
-  )
-}
