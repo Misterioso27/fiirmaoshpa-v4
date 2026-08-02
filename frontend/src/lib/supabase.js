@@ -99,8 +99,19 @@ export const db = {
     return data
   },
 
+  // Resuelve el registro de `clients` vinculado a un usuario del Portal (auth.uid())
+  async getClientByUserId(userId) {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('id, first_name, last_name, client_code')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    return data
+  },
+
   // ── LOAN APPLICATIONS ────────────────────────────────────
-  async getLoanApplications({ page = 1, limit = 20, status = '', companyId }) {
+  async getLoanApplications({ page = 1, limit = 20, status = '', companyId, clientId = null }) {
     const offset = (page - 1) * limit
     let query = supabase
       .from('loan_applications')
@@ -114,6 +125,7 @@ export const db = {
       .order('created_at', { ascending: false })
 
     if (status) query = query.eq('status', status)
+    if (clientId) query = query.eq('client_id', clientId)
 
     const { data, error, count } = await query
     if (error) throw new Error(error.message)
@@ -158,7 +170,7 @@ export const db = {
   },
 
   // ── LOANS ────────────────────────────────────────────────
-  async getLoans({ page = 1, limit = 20, status = '', companyId }) {
+  async getLoans({ page = 1, limit = 20, status = '', companyId, clientId = null }) {
     const offset = (page - 1) * limit
     let query = supabase
       .from('loans')
@@ -172,6 +184,7 @@ export const db = {
       .order('created_at', { ascending: false })
 
     if (status) query = query.eq('status', status)
+    if (clientId) query = query.eq('client_id', clientId)
 
     const { data, error, count } = await query
     if (error) throw new Error(error.message)
