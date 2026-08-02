@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { TrendingUp, Plus, X } from 'lucide-react'
-import { supabase, fmt, fmtDate, fmtPercent } from '@/lib/supabase'
+import { db, supabase, fmt, fmtDate, fmtPercent } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
 
@@ -37,12 +37,15 @@ export default function Investments() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   const branchId  = user?.branch?.id  || 'b0000000-0000-4000-8000-000000000001'
+  const isClient  = user?.role?.code === 'client'
 
   const [investments, setInvestments]   = useState([])
   const [loading, setLoading]           = useState(true)
   const [page, setPage]                 = useState(1)
   const [pagination, setPagination]     = useState({})
   const [status, setStatus]             = useState('')
+  const [myClientId, setMyClientId]     = useState(null)
+  const [resolvingClient, setResolvingClient] = useState(isClient)
 
   // Simulador
   const [simAmount, setSimAmount]       = useState(100000)
@@ -66,6 +69,18 @@ export default function Investments() {
   const [saving, setSaving]             = useState(false)
   const [formCalc, setFormCalc]         = useState({ final: 0, yieldTotal: 0, schedule: [] })
 
+  // ── Si el usuario es rol Cliente, resuelve su client_id una sola vez ──
+  useEffect(() => {
+    if (!isClient || !user?.id) { setResolvingClient(false); return }
+    (async () => {
+      try {
+        const c = await db.getClientByUserId(user.id)
+        setMyClientId(c?.id || null)
+      } catch (e) { console.error(e) }
+      setResolvingClient(false)
+    })()
+  }, [isClient, user?.id])
+
   // Recalcular preview del formulario
   useEffect(() => {
     setFormCalc(calcSimulator({
@@ -81,6 +96,8 @@ export default function Investments() {
   // ── Cargar inversiones ────────────────────────────────────
   const load = useCallback(async () => {
     if (!companyId) return
+    if (isClient && resolvingClient) return
+    if (isClient && !myClientId) { setInvestments([]); setPagination({}); setLoading(false); return }
     setLoading(true)
     try {
       const limit  = 20
@@ -99,6 +116,7 @@ export default function Investments() {
         .order('opened_at', { ascending: false })
 
       if (status) query = query.eq('status', status)
+      if (isClient && myClientId) query = query.eq('client_id', myClientId)
 
       const { data, error, count } = await query
       if (!error) {
@@ -107,12 +125,13 @@ export default function Investments() {
       }
     } catch (err) { console.error(err) }
     setLoading(false)
-  }, [page, status, companyId])
+  }, [page, status, companyId, isClient, myClientId, resolvingClient])
 
   useEffect(() => { load() }, [load])
 
   // ── Abrir modal nuevo depósito ────────────────────────────
   async function openNew() {
+    if (isClient) return // seguridad extra — el botón ya está oculto para este rol
     setForm({ client_id: '', currency: 'BRL', amount: '', rate_monthly: 3, months: 12, maturity_date: '', notes: '' })
     setShowModal(true)
     try {
@@ -132,6 +151,7 @@ export default function Investments() {
 
   // ── Guardar nuevo depósito ────────────────────────────────
   async function saveInvestment() {
+    if (isClient) return
     if (!form.client_id)  return alert('Selecciona un cliente')
     if (!form.amount)     return alert('El monto es obligatorio')
     if (!form.rate_monthly) return alert('La tasa mensual es obligatoria')
@@ -262,14 +282,16 @@ export default function Investments() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-hpa-slate-9">Inversiones</h2>
-          <p className="text-xs text-hpa-slate-5 mt-0.5">{pagination.total || 0} depósitos registrados</p>
+          <p className="text-xs text-hpa-slate-5 mt-0.5">{pagination.total || 0} depósitos{isClient ? ' propios' : ' registrados'}</p>
         </div>
-        <button className="btn btn-primary" onClick={openNew}>
-          <Plus size={14} /> Nuevo Depósito
-        </button>
+        {!isClient && (
+          <button className="btn btn-primary" onClick={openNew}>
+            <Plus size={14} /> Nuevo Depósito
+          </button>
+        )}
       </div>
 
-      {/* Simulador */}
+      {/* Simulador — visible para todos, es informativo, no toca datos de otros */}
       <div className="card bg-gradient-to-r from-hpa-900 to-hpa-700 text-white">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-hpa-gold">Simulador de Rendimiento</h3>
@@ -364,11 +386,11 @@ export default function Investments() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {(loading || (isClient && resolvingClient)) ? (
                 <tr><td colSpan={11} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
               ) : investments.length === 0 ? (
                 <tr><td colSpan={11}>
-                  <Empty icon={TrendingUp} title="Sin inversiones" desc="Registra el primer depósito" />
+                  <Empty icon={TrendingUp} title="Sin inversiones" desc={isClient ? 'Aún no tienes depósitos registrados' : 'Registra el primer depósito'} />
                 </td></tr>
               ) : investments.map(inv => (
                 <tr key={inv.id}>
@@ -406,6 +428,7 @@ export default function Investments() {
       </div>
 
       {/* ── MODAL NUEVO DEPÓSITO ──────────────────────────────── */}
+      {!isClient && (
       <Modal open={showModal} onClose={() => setShowModal(false)}
         title="Nuevo Depósito de Inversión" size="lg"
         footer={
@@ -500,6 +523,7 @@ export default function Investments() {
           )}
         </div>
       </Modal>
+      )}
     </div>
   )
 }
