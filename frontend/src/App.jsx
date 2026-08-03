@@ -30,18 +30,18 @@ export default function App() {
         <Route path="/" element={<Guard><Layout /></Guard>}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard"   element={<PermissionGuard module="dashboard"><Dashboard /></PermissionGuard>} />
-          <Route path="clients"     element={<PermissionGuard module="clients"><Clients /></PermissionGuard>} />
+          <Route path="clients"     element={<PermissionGuard module="clients" staffOnly><Clients /></PermissionGuard>} />
           <Route path="investments" element={<PermissionGuard module="investments"><Investments /></PermissionGuard>} />
           <Route path="loans"       element={<PermissionGuard module="loans"><Loans /></PermissionGuard>} />
-          <Route path="collections" element={<PermissionGuard module="collections"><Collections /></PermissionGuard>} />
-          <Route path="cash"        element={<PermissionGuard module="cash"><Cash /></PermissionGuard>} />
-          <Route path="employees"   element={<PermissionGuard module="employees"><Employees /></PermissionGuard>} />
-          <Route path="ai"          element={<PermissionGuard module="ai"><AIAgents /></PermissionGuard>} />
-          <Route path="reports"     element={<PermissionGuard module="reports"><Reports /></PermissionGuard>} />
-          <Route path="audit"       element={<PermissionGuard module="audit"><Audit /></PermissionGuard>} />
-          <Route path="settings"    element={<PermissionGuard module="settings"><Settings /></PermissionGuard>} />
-          <Route path="cartera"     element={<PermissionGuard module="cartera"><Cartera /></PermissionGuard>} />
-          <Route path="import"      element={<PermissionGuard module="import"><Import /></PermissionGuard>} />
+          <Route path="collections" element={<PermissionGuard module="collections" staffOnly><Collections /></PermissionGuard>} />
+          <Route path="cash"        element={<PermissionGuard module="cash" staffOnly><Cash /></PermissionGuard>} />
+          <Route path="employees"   element={<PermissionGuard module="employees" staffOnly><Employees /></PermissionGuard>} />
+          <Route path="ai"          element={<PermissionGuard module="ai" staffOnly><AIAgents /></PermissionGuard>} />
+          <Route path="reports"     element={<PermissionGuard module="reports" staffOnly><Reports /></PermissionGuard>} />
+          <Route path="audit"       element={<PermissionGuard module="audit" staffOnly><Audit /></PermissionGuard>} />
+          <Route path="settings"    element={<PermissionGuard module="settings" staffOnly><Settings /></PermissionGuard>} />
+          <Route path="cartera"     element={<PermissionGuard module="cartera" staffOnly><Cartera /></PermissionGuard>} />
+          <Route path="import"      element={<PermissionGuard module="import" staffOnly><Import /></PermissionGuard>} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
