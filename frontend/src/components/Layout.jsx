@@ -14,11 +14,11 @@ const NAV = [
   { to: '/clients',     icon: Users,           label: 'Clientes',       module: 'clients'     },
   { to: '/investments', icon: TrendingUp,      label: 'Inversiones',    module: 'investments' },
   { to: '/loans',       icon: CreditCard,      label: 'Préstamos',      module: 'loans'       },
-  { to: '/cartera',     icon: LayoutList,      label: 'Cartera',        module: 'loans'       },
+  { to: '/cartera',     icon: LayoutList,      label: 'Cartera',        module: 'loans',       staffOnly: true },
   { to: '/collections', icon: PhoneCall,       label: 'Cobranza',       module: 'collections' },
   { to: '/cash',        icon: Landmark,        label: 'Caja',           module: 'cash'        },
   { to: '/employees',   icon: Briefcase,       label: 'Empleados',      module: 'employees'   },
-  { to: '/import',      icon: UploadIcon,      label: 'Importar',       module: 'loans'       },
+  { to: '/import',      icon: UploadIcon,      label: 'Importar',       module: 'loans',       staffOnly: true },
   { to: '/ai',          icon: Bot,             label: 'FIIRMAOSHPA AI', module: 'ai'          },
   { to: '/reports',     icon: BarChart3,       label: 'Reportes',       module: 'reports'     },
   { to: '/audit',       icon: Shield,          label: 'Auditoría',      module: 'audit'       },
@@ -128,6 +128,7 @@ function ProfileDropdown({ user, onLogout }) {
 function Sidebar({ open, onClose }) {
   const { user, logout, hasPermission } = useAuthStore()
   const navigate = useNavigate()
+  const isClient = user?.role?.code === 'client'
 
   async function handleLogout() {
     await logout()
@@ -175,7 +176,8 @@ function Sidebar({ open, onClose }) {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-          {NAV.map(({ to, icon: Icon, label, module }) => {
+          {NAV.map(({ to, icon: Icon, label, module, staffOnly }) => {
+            if (staffOnly && isClient) return null
             if (module !== 'dashboard' && !hasPermission(module)) return null
             return (
               <NavLink key={to} to={to} onClick={onClose}
