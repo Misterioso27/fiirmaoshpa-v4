@@ -2,14 +2,12 @@ import { Navigate } from 'react-router-dom'
 import { ShieldAlert } from 'lucide-react'
 import useAuthStore from '@/store/auth'
 
-// Bloquea el acceso a una ruta si el usuario no tiene permiso de ver ese módulo.
-// super_admin siempre pasa (ya resuelto dentro de hasPermission).
-export default function PermissionGuard({ module, action = 'can_view', children }) {
+export default function PermissionGuard({ module, action = 'can_view', staffOnly = false, children }) {
   const { user, hasPermission } = useAuthStore()
-
   if (!user) return <Navigate to="/login" replace />
-
-  if (!hasPermission(module, action)) {
+  const isClient = user?.role?.code === 'client'
+  const blocked = (staffOnly && isClient) || !hasPermission(module, action)
+  if (blocked) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center px-6">
         <ShieldAlert size={40} className="text-red-400 mb-4" />
@@ -21,6 +19,5 @@ export default function PermissionGuard({ module, action = 'can_view', children 
       </div>
     )
   }
-
   return children
 }
