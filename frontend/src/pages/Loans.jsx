@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, CreditCard, Calculator, Upload, ShieldAlert,
-         CheckCircle2, Edit2, CheckSquare, XSquare, DollarSign, Building2 } from 'lucide-react'
+         CheckCircle2, Edit2, CheckSquare, XSquare, DollarSign, Building2, FileCheck2 } from 'lucide-react'
 import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner, Tabs } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -276,6 +276,8 @@ export default function Loans() {
   const [idDocUrl, setIdDocUrl]         = useState('')
   const [myClientId, setMyClientId]     = useState(null)
   const [resolvingClient, setResolvingClient] = useState(isClient)
+  const [uploadingPagareId, setUploadingPagareId] = useState(null)
+  const [confirmingPagareId, setConfirmingPagareId] = useState(null)
 
   // ── Si el usuario es rol Cliente, resuelve su client_id una sola vez ──
   useEffect(() => {
@@ -398,6 +400,41 @@ export default function Loans() {
       setIdDocUrl(urlData.publicUrl); fc('id_doc_url', urlData.publicUrl)
     } catch { alert('Error al subir documento.') }
     setUploading(false)
+  }
+
+  // ── FASE B: cliente sube su Pagaré ya firmado ─────────────
+  async function uploadSignedPagare(item, file) {
+    if (!file) return
+    setUploadingPagareId(item.id)
+    try {
+      const ext = file.name.split('.').pop()
+      const path = `loan-docs/${companyId}/signed-pagare/${item.id}-${Date.now()}.${ext}`
+      const { error: err } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+      if (err) throw err
+      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path)
+      const nuevoAi = {
+        ...(item.ai_analysis || {}),
+        signed_pagare_url: urlData.publicUrl,
+        signed_pagare_uploaded_at: new Date().toISOString(),
+        pagare_confirmed: false,
+      }
+      await supabase.from('loan_applications').update({ ai_analysis: nuevoAi }).eq('id', item.id)
+      alert('✅ Pagaré firmado subido. Queda pendiente de confirmación por el equipo.')
+      load()
+    } catch (err) { alert('❌ Error al subir el pagaré firmado: ' + err.message) }
+    setUploadingPagareId(null)
+  }
+
+  // ── FASE B: staff confirma el Pagaré recibido ─────────────
+  async function confirmSignedPagare(item) {
+    if (isClient) return
+    setConfirmingPagareId(item.id)
+    try {
+      const nuevoAi = { ...(item.ai_analysis || {}), pagare_confirmed: true, pagare_confirmed_by: user.id, pagare_confirmed_at: new Date().toISOString() }
+      await supabase.from('loan_applications').update({ ai_analysis: nuevoAi }).eq('id', item.id)
+      load()
+    } catch (err) { alert('❌ ' + err.message) }
+    setConfirmingPagareId(null)
   }
 
   async function save() {
@@ -576,18 +613,42 @@ export default function Loans() {
                       <p className="text-xs text-hpa-slate-5">{tipoLabel[ai.frequency] || '—'}</p>
                     </td>
                     <td className="max-w-xs truncate text-xs">{item.purpose || '—'}</td>
-                    <td><StatusBadge status={item.status} /></td>
+                    <td>
+                      <StatusBadge status={item.status} />
+                      {item.status === 'approved' && ai.signed_pagare_url && (
+                        <div className="mt-1">
+                          {ai.pagare_confirmed
+                            ? <span className="badge badge-green text-2xs">Pagaré confirmado</span>
+                            : <span className="badge badge-amber text-2xs">Pagaré pend. confirmar</span>}
+                        </div>
+                      )}
+                    </td>
                     <td className="text-xs text-hpa-slate-5">{fmtDate(item.created_at)}</td>
                     <td>
                       {isClient ? (
                         item.status === 'approved' ? (
-                          <button
-                            className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
-                            title="Descargar Pagaré Notarial"
-                            onClick={() => generarPagare(item)}
-                          >
-                            📄 Pagaré
-                          </button>
+                          <div className="flex flex-col gap-1.5 items-start">
+                            <button
+                              className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
+                              title="Descargar Pagaré Notarial"
+                              onClick={() => generarPagare(item)}
+                            >
+                              📄 Pagaré
+                            </button>
+                            {ai.signed_pagare_url ? (
+                              <span className="text-2xs text-hpa-slate-5">
+                                {ai.pagare_confirmed ? '✅ Pagaré confirmado por la empresa' : '⏳ Pagaré subido, esperando confirmación'}
+                              </span>
+                            ) : (
+                              <label className="btn btn-sm btn-ghost border border-hpa-slate-3 cursor-pointer">
+                                <Upload size={12} className="inline mr-1" />
+                                {uploadingPagareId === item.id ? 'Subiendo...' : 'Subir Pagaré Firmado'}
+                                <input type="file" className="hidden" accept="image/*,.pdf"
+                                  disabled={uploadingPagareId === item.id}
+                                  onChange={e => uploadSignedPagare(item, e.target.files[0])} />
+                              </label>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-xs text-hpa-slate-4">—</span>
                         )
@@ -609,6 +670,23 @@ export default function Loans() {
                               >
                                 📄 Pagaré
                               </button>
+                              {ai.signed_pagare_url && !ai.pagare_confirmed && (
+                                <>
+                                  <a href={ai.signed_pagare_url} target="_blank" rel="noreferrer"
+                                    className="btn btn-sm btn-ghost border border-blue-300 text-blue-700 hover:bg-blue-50">
+                                    Ver Pagaré Firmado
+                                  </a>
+                                  <button
+                                    className="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100"
+                                    disabled={confirmingPagareId === item.id}
+                                    onClick={() => confirmSignedPagare(item)}
+                                  >
+                                    <FileCheck2 size={13} /><span className="ml-1 text-xs font-semibold">
+                                      {confirmingPagareId === item.id ? 'Confirmando...' : 'Confirmar Pagaré'}
+                                    </span>
+                                  </button>
+                                </>
+                              )}
                               <button className="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100" onClick={() => openDisbursal(item)}>
                                 <DollarSign size={13} /><span className="ml-1 text-xs font-semibold">Desembolsar</span>
                               </button>
@@ -855,6 +933,12 @@ export default function Loans() {
         }>
         {disbursalItem && (
           <div className="space-y-4">
+            {disbursalItem.ai_analysis && !disbursalItem.ai_analysis.pagare_confirmed && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                <ShieldAlert size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-800">El pagaré firmado de este cliente aún no ha sido confirmado. Verifica antes de desembolsar.</p>
+              </div>
+            )}
             <div className="p-4 bg-hpa-slate-1 rounded-xl">
               <p className="font-bold text-hpa-slate-9">{disbursalItem.clients?.first_name} {disbursalItem.clients?.last_name}</p>
               <p className="text-xs text-hpa-slate-5 mb-3">{disbursalItem.application_code} · {disbursalItem.purpose}</p>
