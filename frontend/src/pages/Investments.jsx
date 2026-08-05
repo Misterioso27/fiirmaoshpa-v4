@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, Plus, X } from 'lucide-react'
+import { TrendingUp, Plus, X, Calculator } from 'lucide-react'
 import { db, supabase, fmt, fmtDate, fmtPercent } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -17,8 +17,26 @@ function fmtC(amount, currency = 'DOP') {
   return `${c.symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-// Simulador con interés compuesto real
-function calcSimulator({ amount, rate, months }) {
+// ── Interés SIMPLE — es el producto real que se le vende al cliente:
+// rendimiento fijo cada mes sobre el capital original, no se acumula sobre sí mismo.
+function calcSimulatorSimple({ amount, rate, months }) {
+  const p = parseFloat(amount || 0)
+  const r = parseFloat(rate   || 0) / 100
+  const m = parseInt(months   || 0)
+  if (!p || !r || !m) return { final: 0, yieldTotal: 0, schedule: [] }
+
+  const yieldMonthly = Math.round(p * r * 100) / 100
+  const schedule = []
+  let balance = p
+  for (let i = 1; i <= m; i++) {
+    balance = Math.round((balance + yieldMonthly) * 100) / 100
+    schedule.push({ month: i, yield: yieldMonthly, balance })
+  }
+  return { final: balance, yieldTotal: Math.round((yieldMonthly * m) * 100) / 100, schedule }
+}
+
+// ── Interés COMPUESTO — solo para referencia interna del staff, no es el producto real.
+function calcSimulatorCompound({ amount, rate, months }) {
   const p  = parseFloat(amount  || 0)
   const r  = parseFloat(rate    || 0) / 100
   const m  = parseInt(months    || 0)
@@ -53,6 +71,7 @@ export default function Investments() {
   const [simMonths, setSimMonths]       = useState(12)
   const [simCurrency, setSimCurrency]   = useState('BRL')
   const [showSimSchedule, setShowSimSchedule] = useState(false)
+  const [simModoInterno, setSimModoInterno] = useState(false) // solo staff: alterna a compuesto como referencia
 
   // Modal nuevo depósito
   const [showModal, setShowModal]       = useState(false)
@@ -81,17 +100,18 @@ export default function Investments() {
     })()
   }, [isClient, user?.id])
 
-  // Recalcular preview del formulario
+  // Recalcular preview del formulario — SIEMPRE interés simple (es el producto real del contrato)
   useEffect(() => {
-    setFormCalc(calcSimulator({
+    setFormCalc(calcSimulatorSimple({
       amount: form.amount,
       rate:   form.rate_monthly,
       months: form.months,
     }))
   }, [form.amount, form.rate_monthly, form.months])
 
-  // Simulador público
-  const simResult = calcSimulator({ amount: simAmount, rate: simRate, months: simMonths })
+  // Simulador público — interés simple por defecto; staff puede alternar a compuesto solo como referencia interna
+  const simCalcFn = (!isClient && simModoInterno) ? calcSimulatorCompound : calcSimulatorSimple
+  const simResult = simCalcFn({ amount: simAmount, rate: simRate, months: simMonths })
 
   // ── Cargar inversiones ────────────────────────────────────
   const load = useCallback(async () => {
@@ -186,7 +206,7 @@ export default function Investments() {
         maturity_date = d.toISOString().split('T')[0]
       }
 
-      // 1. Crear inversión
+      // 1. Crear inversión — capitalización real del producto: SIMPLE
       const { data: inv, error: invErr } = await supabase
         .from('investments')
         .insert({
@@ -201,7 +221,7 @@ export default function Investments() {
           fx_rate_at_open:  1,
           rate_monthly:     parseFloat(form.rate_monthly),
           tier,
-          capitalization:   'compound',
+          capitalization:   'simple',
           status:           'active',
           opened_at:        new Date().toISOString(),
           maturity_date,
@@ -238,6 +258,7 @@ export default function Investments() {
           currency:       form.currency,
           amount,
           tier,
+          capitalization: 'simple',
           months:         parseInt(form.months),
           maturity_date,
           notes:          form.notes || null,
@@ -269,7 +290,7 @@ export default function Investments() {
         `✅ Depósito registrado exitosamente.\n` +
         `Código: ${investment_code}\n` +
         `Monto: ${fmtC(amount, form.currency)}\n` +
-        `Tasa: ${form.rate_monthly}% mensual · Tier: ${tier.toUpperCase()}\n` +
+        `Tasa: ${form.rate_monthly}% mensual (interés simple) · Tier: ${tier.toUpperCase()}\n` +
         `Vencimiento: ${maturity_date || '—'}`
       )
     } catch (err) { alert('❌ ' + err.message) }
@@ -291,16 +312,29 @@ export default function Investments() {
         )}
       </div>
 
-      {/* Simulador — visible para todos, es informativo, no toca datos de otros */}
+      {/* Simulador */}
       <div className="card bg-gradient-to-r from-hpa-900 to-hpa-700 text-white">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-hpa-gold">Simulador de Rendimiento</h3>
-          <button
-            className="text-xs text-white/60 hover:text-white underline"
-            onClick={() => setShowSimSchedule(!showSimSchedule)}
-          >
-            {showSimSchedule ? 'Ocultar tabla' : 'Ver tabla mensual'}
-          </button>
+          <h3 className="text-sm font-semibold text-hpa-gold">
+            Simulador de Rendimiento {(!isClient && simModoInterno) && <span className="text-2xs text-white/50 font-normal">(vista interna — compuesto, no es el producto real)</span>}
+          </h3>
+          <div className="flex items-center gap-3">
+            {!isClient && (
+              <button
+                className="text-xs text-white/60 hover:text-white underline flex items-center gap-1"
+                onClick={() => setSimModoInterno(!simModoInterno)}
+              >
+                <Calculator size={12} />
+                {simModoInterno ? 'Ver cálculo real (simple)' : 'Ver cálculo interno (compuesto)'}
+              </button>
+            )}
+            <button
+              className="text-xs text-white/60 hover:text-white underline"
+              onClick={() => setShowSimSchedule(!showSimSchedule)}
+            >
+              {showSimSchedule ? 'Ocultar tabla' : 'Ver tabla mensual'}
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-4 gap-4 mb-4">
           <Field label={<span className="text-white/60 text-xs">Moneda</span>}>
@@ -492,11 +526,11 @@ export default function Investments() {
               value={form.notes} onChange={e => fc('notes', e.target.value)} />
           </Field>
 
-          {/* Preview del rendimiento */}
+          {/* Preview del rendimiento — interés simple, es el producto real */}
           {form.amount && form.rate_monthly && form.months && (
             <div className="p-4 bg-hpa-slate-1 rounded-xl border border-hpa-slate-2">
               <p className="text-xs font-bold text-hpa-slate-7 mb-3 uppercase tracking-wide">
-                Preview del rendimiento
+                Preview del rendimiento (interés simple)
               </p>
               <div className="grid grid-cols-3 gap-3 text-center text-xs">
                 <div>
