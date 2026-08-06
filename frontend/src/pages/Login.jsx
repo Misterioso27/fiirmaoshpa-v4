@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Eye, EyeOff, Loader2, UserPlus, ArrowLeft, CreditCard, TrendingUp } from 'lucide-react'
+import { Building2, Eye, EyeOff, Loader2, UserPlus, ArrowLeft, CreditCard, TrendingUp, Mail, CheckCircle2 } from 'lucide-react'
 import useAuthStore from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 
@@ -8,7 +8,7 @@ const COMPANY_ID = 'a0000000-0000-4000-8000-000000000001'
 const BRANCH_ID  = 'b0000000-0000-4000-8000-000000000001'
 
 export default function Login() {
-  const [mode, setMode] = useState('login') // 'login' | 'register' | 'choose'
+  const [mode, setMode] = useState('login') // 'login' | 'register' | 'choose' | 'forgot'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [show, setShow] = useState(false)
@@ -23,6 +23,12 @@ export default function Login() {
   })
   const [regSaving, setRegSaving] = useState(false)
   const [regError, setRegError] = useState('')
+
+  // recuperar contraseña
+  const [forgotEmail, setForgotEmail]     = useState('')
+  const [forgotSaving, setForgotSaving]   = useState(false)
+  const [forgotError, setForgotError]     = useState('')
+  const [forgotSent, setForgotSent]       = useState(false)
 
   function rc(k, v) { setRegForm(f => ({ ...f, [k]: v })) }
 
@@ -73,6 +79,23 @@ export default function Login() {
       setRegError(err.message)
     }
     setRegSaving(false)
+  }
+
+  async function handleForgot(e) {
+    e.preventDefault()
+    setForgotError('')
+    if (!forgotEmail) { setForgotError('Ingresa tu correo electrónico.'); return }
+    setForgotSaving(true)
+    try {
+      const { error: err } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      })
+      if (err) throw new Error(err.message)
+      setForgotSent(true)
+    } catch (err) {
+      setForgotError(err.message)
+    }
+    setForgotSaving(false)
   }
 
   function goTo(destino) {
@@ -129,14 +152,59 @@ export default function Login() {
               </button>
             </form>
             <div className="mt-4 text-center space-y-2">
-              <a href="/forgot-password" className="block text-xs text-white/40 hover:text-white/70 transition-colors">
+              <button type="button" onClick={() => { setMode('forgot'); setForgotError(''); setForgotSent(false) }}
+                className="block w-full text-xs text-white/40 hover:text-white/70 transition-colors">
                 ¿Olvidaste tu contraseña?
-              </a>
+              </button>
               <button type="button" onClick={() => { setMode('register'); setRegError('') }}
                 className="inline-flex items-center gap-1 text-xs text-hpa-gold hover:text-hpa-gold/80 font-semibold transition-colors">
                 <UserPlus size={13} /> Crear cuenta nueva
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ─── RECUPERAR CONTRASEÑA ──────────────────────────── */}
+        {mode === 'forgot' && (
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
+            <button type="button" onClick={() => setMode('login')}
+              className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 mb-4">
+              <ArrowLeft size={13} /> Volver a iniciar sesión
+            </button>
+            {forgotSent ? (
+              <div className="text-center py-4">
+                <CheckCircle2 size={32} className="text-emerald-400 mx-auto mb-3" />
+                <p className="text-white font-semibold text-sm mb-1">Correo enviado</p>
+                <p className="text-white/50 text-xs">
+                  Revisa tu bandeja de entrada en <strong className="text-white/70">{forgotEmail}</strong> y sigue el enlace para elegir una nueva contraseña.
+                </p>
+              </div>
+            ) : (
+              <>
+                <h2 className="text-white font-semibold text-base mb-2">Recuperar contraseña</h2>
+                <p className="text-white/50 text-xs mb-5">Te enviaremos un enlace a tu correo para elegir una nueva contraseña.</p>
+                {forgotError && (
+                  <div className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/30 text-red-200 text-sm">
+                    {forgotError}
+                  </div>
+                )}
+                <form onSubmit={handleForgot} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-white/60 mb-1">Correo electrónico</label>
+                    <div className="relative">
+                      <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+                      <input type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+                        required autoFocus placeholder="usuario@fiirmaoshpa.com"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/30 text-sm focus:outline-none focus:ring-2 focus:ring-hpa-gold/50 focus:border-hpa-gold/50 transition-all" />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={forgotSaving}
+                    className="w-full btn btn-gold py-2.5 justify-center text-sm font-semibold mt-2">
+                    {forgotSaving ? <Loader2 size={15} className="animate-spin" /> : 'Enviar enlace de recuperación'}
+                  </button>
+                </form>
+              </>
+            )}
           </div>
         )}
 
