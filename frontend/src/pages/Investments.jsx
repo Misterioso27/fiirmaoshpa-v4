@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, Plus, X, Calculator, Sparkles } from 'lucide-react'
+import { TrendingUp, Plus, X, Calculator, Sparkles, Upload, FileCheck2 } from 'lucide-react'
 import { db, supabase, fmt, fmtDate, fmtPercent } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -11,6 +11,17 @@ const CURRENCIES = {
   EUR: { symbol: '€',   flag: '🇪🇺' },
   GBP: { symbol: '£',   flag: '🇬🇧' },
 }
+
+// ── Representante legal fijo de la empresa (mismo que en Pagarés de préstamos) ────
+const REPRESENTANTE_LEGAL = {
+  nombre: 'CÉSAR AUGUSTO DE LOS SANTOS PEREZ',
+  cargo: 'Gerente de Operaciones / CEO / Co-Propietario',
+  cedula: '224-0001237-7',
+  direccion: '_______________________________________________', // TODO: confirmar dirección exacta de oficina
+}
+
+const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-cesar.png'
+const SELLO_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Sellos/a0000000-0000-4000-8000-000000000001/sello-empresa.png'
 
 function fmtC(amount, currency = 'DOP') {
   const c = CURRENCIES[currency] || CURRENCIES.DOP
@@ -52,6 +63,133 @@ function calcSimulatorCompound({ amount, rate, months }) {
   return { final: balance, yieldTotal: Math.round((balance - p) * 100) / 100, schedule }
 }
 
+function numeroALetras(n) {
+  const unidades = ['','UNO','DOS','TRES','CUATRO','CINCO','SEIS','SIETE','OCHO','NUEVE',
+    'DIEZ','ONCE','DOCE','TRECE','CATORCE','QUINCE','DIECISÉIS','DIECISIETE','DIECIOCHO','DIECINUEVE']
+  const decenas  = ['','','VEINTE','TREINTA','CUARENTA','CINCUENTA','SESENTA','SETENTA','OCHENTA','NOVENTA']
+  const centenas = ['','CIEN','DOSCIENTOS','TRESCIENTOS','CUATROCIENTOS','QUINIENTOS',
+    'SEISCIENTOS','SETECIENTOS','OCHOCIENTOS','NOVECIENTOS']
+  function centToStr(c) {
+    if (c === 0) return ''
+    if (c < 20)  return unidades[c]
+    if (c < 100) {
+      const d = Math.floor(c / 10), u = c % 10
+      return u === 0 ? decenas[d] : (d === 2 ? 'VEINTI' + unidades[u] : decenas[d] + ' Y ' + unidades[u])
+    }
+    if (c === 100) return 'CIEN'
+    const ch = Math.floor(c / 100), resto = c % 100
+    return centenas[ch] + (resto > 0 ? ' ' + centToStr(resto) : '')
+  }
+  function intToStr(num) {
+    if (num === 0)     return 'CERO'
+    if (num < 1000)    return centToStr(num)
+    if (num < 1000000) {
+      const miles = Math.floor(num / 1000), resto = num % 1000
+      const mStr  = miles === 1 ? 'MIL' : centToStr(miles) + ' MIL'
+      return mStr + (resto > 0 ? ' ' + centToStr(resto) : '')
+    }
+    return num.toLocaleString()
+  }
+  const partes = String(parseFloat(n).toFixed(2)).split('.')
+  return { str: intToStr(parseInt(partes[0])), cents: partes[1] || '00' }
+}
+
+// ── Genera el documento de Contrato de Inversión (privado, NO es un pagaré notarial) ──
+function generarContratoInversion(inv) {
+  const cliente = `${inv.clients?.first_name || ''} ${inv.clients?.last_name || ''}`.trim().toUpperCase()
+  const cedula  = inv.clients?.client_code || '_______________'
+  const monto   = parseFloat(inv.amount || 0)
+  const sym     = CURRENCIES[inv.currency]?.symbol || 'RD$'
+  const { str: montoStr, cents } = numeroALetras(monto)
+  const montoFormateado = monto.toLocaleString('en-US', { minimumFractionDigits: 2 })
+  const hoy = new Date()
+  const fmtFechaCorta = (d) => d.toLocaleDateString('es-DO', { day: '2-digit', month: 'long', year: 'numeric' })
+  const vencimiento = inv.maturity_date ? fmtDate(inv.maturity_date) : '—'
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Contrato de Inversión — ${inv.investment_code || ''}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Times New Roman', Times, serif; font-size: 13.5px; line-height: 1.8; color: #000; background: #fff; }
+  .page { position: relative; max-width: 780px; margin: 0 auto; padding: 50px 60px; }
+  .header { text-align: center; margin-bottom: 30px; }
+  .logo-outer { border: 3px double #000; display: inline-block; padding: 10px 30px; margin-bottom: 12px; }
+  .logo-name { font-size: 15px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase; }
+  .logo-sub  { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #333; }
+  .titulo { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin: 16px 0 4px; text-decoration: underline; }
+  .aviso { font-size: 10px; color: #999; text-align: center; margin-bottom: 16px; font-style: italic; }
+  .cuerpo { text-align: justify; }
+  .cuerpo p { margin-bottom: 14px; }
+  .ref-box { border: 1px solid #ccc; padding: 8px 14px; font-size: 11px; color: #555; margin-bottom: 20px; display: flex; justify-content: space-between; }
+  .gold-sep { border: none; border-top: 2px solid #C9A84C; margin: 20px 0; }
+  .condiciones { border: 1px solid #ddd; border-radius: 6px; padding: 14px 18px; margin: 18px 0; font-size: 12px; }
+  .condiciones div { display: flex; justify-content: space-between; padding: 3px 0; }
+  .sello-marca { position: absolute; top: 40px; right: 45px; width: 120px; height: 120px; opacity: 0.9; pointer-events: none; }
+  .firma-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; margin-top: 50px; }
+  .firma-box { text-align: center; }
+  .firma-linea { border-top: 1px solid #000; padding-top: 8px; margin-top: 70px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+  .firma-cargo { font-size: 11px; color: #333; margin-top: 2px; }
+  .firma-img-box { text-align: center; }
+  .firma-img { height: 60px; object-fit: contain; }
+  @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } .page { padding: 30px 40px; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <img src="${SELLO_URL}" class="sello-marca" alt="Sello" />
+  <div class="header">
+    <div class="logo-outer">
+      <div class="logo-name">Financiera e Inversiones Irmaos HPA SRL</div>
+      <div class="logo-sub">RNC: 133-36415-8 · Registro Mercantil: 327047SD</div>
+    </div>
+    <div class="titulo">Contrato de Depósito de Inversión</div>
+  </div>
+  <div class="aviso">Documento privado entre las partes — no constituye un instrumento notarial ni valor negociable registrado</div>
+  <div class="ref-box">
+    <span>Referencia: <strong>${inv.investment_code || '—'}</strong></span>
+    <span>Fecha: <strong>${fmtFechaCorta(hoy)}</strong></span>
+    <span>Moneda: <strong>${inv.currency}</strong></span>
+  </div>
+  <hr class="gold-sep">
+  <div class="cuerpo">
+    <p>Entre <strong>Financiera e Inversiones Irmaos HPA SRL</strong>, representada legalmente por el señor <strong>${REPRESENTANTE_LEGAL.nombre}</strong>, ${REPRESENTANTE_LEGAL.cargo}, portador de la Cédula Número <strong>${REPRESENTANTE_LEGAL.cedula}</strong> (en adelante "LA FINANCIERA"), y el/la señor/a <strong>${cliente}</strong>, código de cliente <strong>${cedula}</strong> (en adelante "EL INVERSIONISTA"), se conviene el presente Contrato de Depósito de Inversión bajo las siguientes condiciones:</p>
+
+    <div class="condiciones">
+      <div><span>Capital depositado</span><strong>${sym} ${montoFormateado}</strong></div>
+      <div><span>En letras</span><strong>${montoStr} CON ${cents}/100 ${sym === 'RD$' ? 'PESOS DOMINICANOS' : ''}</strong></div>
+      <div><span>Tasa de rendimiento mensual</span><strong>${inv.rate_monthly}%</strong></div>
+      <div><span>Modalidad de cálculo</span><strong>Interés simple (rendimiento fijo mensual sobre el capital original)</strong></div>
+      <div><span>Fecha de apertura</span><strong>${fmtDate(inv.opened_at)}</strong></div>
+      <div><span>Fecha de vencimiento</span><strong>${vencimiento}</strong></div>
+    </div>
+
+    <p>EL INVERSIONISTA declara haber entregado a LA FINANCIERA la suma indicada arriba, la cual será administrada según el modelo de negocio de LA FINANCIERA, generando el rendimiento mensual pactado hasta la fecha de vencimiento o hasta que las partes acuerden su liquidación anticipada.</p>
+    <p>LA FINANCIERA se compromete a informar a EL INVERSIONISTA del estado de su inversión a través de la plataforma digital de la empresa, y a realizar los pagos de rendimiento y/o liquidación de capital según las condiciones aquí pactadas.</p>
+    <p>Ambas partes firman el presente contrato en señal de conformidad con lo aquí establecido.</p>
+  </div>
+  <div class="firma-grid">
+    <div class="firma-box">
+      <div class="firma-linea">${cliente}</div>
+      <div class="firma-cargo">EL INVERSIONISTA</div>
+    </div>
+    <div class="firma-box">
+      <img src="${FIRMA_URL}" class="firma-img" alt="Firma" /><br/>
+      <div class="firma-linea" style="margin-top:8px">${REPRESENTANTE_LEGAL.nombre}</div>
+      <div class="firma-cargo">${REPRESENTANTE_LEGAL.cargo} — LA FINANCIERA</div>
+    </div>
+  </div>
+</div>
+<script>window.onload = function() { window.print() }</script>
+</body>
+</html>`
+
+  const ventana = window.open('', '_blank', 'width=900,height=750')
+  if (ventana) { ventana.document.write(html); ventana.document.close() }
+}
+
 export default function Investments() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
@@ -66,6 +204,8 @@ export default function Investments() {
   const [myClientId, setMyClientId]     = useState(null)
   const [resolvingClient, setResolvingClient] = useState(isClient)
   const [promoSavingId, setPromoSavingId] = useState(null)
+  const [uploadingContractId, setUploadingContractId] = useState(null)
+  const [confirmingContractId, setConfirmingContractId] = useState(null)
 
   // Simulador
   const [simAmount, setSimAmount]       = useState(100000)
@@ -73,7 +213,7 @@ export default function Investments() {
   const [simMonths, setSimMonths]       = useState(12)
   const [simCurrency, setSimCurrency]   = useState('BRL')
   const [showSimSchedule, setShowSimSchedule] = useState(false)
-  const [simModoInterno, setSimModoInterno] = useState(false) // solo staff: alterna a compuesto como referencia
+  const [simModoInterno, setSimModoInterno] = useState(false)
 
   // Modal nuevo depósito
   const [showModal, setShowModal]       = useState(false)
@@ -90,7 +230,6 @@ export default function Investments() {
   const [saving, setSaving]             = useState(false)
   const [formCalc, setFormCalc]         = useState({ final: 0, yieldTotal: 0, schedule: [] })
 
-  // ── Si el usuario es rol Cliente, resuelve su client_id una sola vez ──
   useEffect(() => {
     if (!isClient || !user?.id) { setResolvingClient(false); return }
     (async () => {
@@ -102,20 +241,13 @@ export default function Investments() {
     })()
   }, [isClient, user?.id])
 
-  // Recalcular preview del formulario — SIEMPRE interés simple (es el producto real del contrato)
   useEffect(() => {
-    setFormCalc(calcSimulatorSimple({
-      amount: form.amount,
-      rate:   form.rate_monthly,
-      months: form.months,
-    }))
+    setFormCalc(calcSimulatorSimple({ amount: form.amount, rate: form.rate_monthly, months: form.months }))
   }, [form.amount, form.rate_monthly, form.months])
 
-  // Simulador público — interés simple por defecto; staff puede alternar a compuesto solo como referencia interna
   const simCalcFn = (!isClient && simModoInterno) ? calcSimulatorCompound : calcSimulatorSimple
   const simResult = simCalcFn({ amount: simAmount, rate: simRate, months: simMonths })
 
-  // ── Cargar inversiones ────────────────────────────────────
   const load = useCallback(async () => {
     if (!companyId) return
     if (isClient && resolvingClient) return
@@ -131,6 +263,7 @@ export default function Investments() {
           current_balance, accrued_yield, total_yield_paid,
           rate_monthly, tier, status, opened_at, maturity_date,
           capitalization, promo_compound_until,
+          signed_contract_url, signed_contract_uploaded_at, contract_confirmed,
           clients(first_name, last_name, client_code, email),
           financial_products(name, code)
         `, { count: 'exact' })
@@ -152,7 +285,6 @@ export default function Investments() {
 
   useEffect(() => { load() }, [load])
 
-  // ── Abrir modal nuevo depósito ────────────────────────────
   async function openNew() {
     if (isClient) {
       setForm({ client_id: myClientId || '', currency: 'BRL', amount: '', rate_monthly: 3, months: 12, maturity_date: '', notes: '' })
@@ -176,7 +308,6 @@ export default function Investments() {
 
   function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
-  // ── Guardar nuevo depósito ────────────────────────────────
   async function saveInvestment() {
     const clientIdToUse = isClient ? myClientId : form.client_id
     if (!clientIdToUse)   return alert(isClient ? 'No se pudo identificar tu registro de cliente. Contacta a soporte.' : 'Selecciona un cliente')
@@ -187,7 +318,6 @@ export default function Investments() {
       const amount = parseFloat(String(form.amount).replace(/,/g, ''))
       if (isNaN(amount) || amount <= 0) throw new Error('Monto inválido')
 
-      // Determinar tier por monto en BRL
       let tier = 'standard'
       const amountBRL = form.currency === 'BRL' ? amount
                       : form.currency === 'USD' ? amount * 5.5
@@ -197,7 +327,6 @@ export default function Investments() {
       if (amountBRL >= 50000) tier = 'premium'
       if (amountBRL >= 200000) tier = 'corporate'
 
-      // Generar código
       const { count } = await supabase
         .from('investments')
         .select('*', { count: 'exact', head: true })
@@ -205,7 +334,6 @@ export default function Investments() {
 
       const investment_code = `HPA-I-${String((count || 0) + 1).padStart(4, '0')}`
 
-      // Calcular fecha de vencimiento si no fue ingresada
       let maturity_date = form.maturity_date || null
       if (!maturity_date && form.months) {
         const d = new Date()
@@ -213,11 +341,9 @@ export default function Investments() {
         maturity_date = d.toISOString().split('T')[0]
       }
 
-      // Próxima fecha de rendimiento: un mes después de la apertura
       const nextYield = new Date()
       nextYield.setMonth(nextYield.getMonth() + 1)
 
-      // 1. Crear inversión — capitalización real del producto: SIMPLE
       const { data: inv, error: invErr } = await supabase
         .from('investments')
         .insert({
@@ -247,7 +373,6 @@ export default function Investments() {
 
       if (invErr) throw new Error(invErr.message)
 
-      // 2. Registrar movimiento de apertura
       await supabase.from('investment_movements').insert({
         investment_id: inv.id,
         type:          'opening',
@@ -260,7 +385,6 @@ export default function Investments() {
         created_by:    user.id,
       })
 
-      // 3. Snapshot de condiciones
       await supabase.from('contract_snapshots').insert({
         entity_type: 'investment',
         entity_id:   inv.id,
@@ -283,7 +407,6 @@ export default function Investments() {
         },
       })
 
-      // 4. Auditoría
       await supabase.from('audit_log').insert({
         company_id:  companyId,
         actor_id:    user.id,
@@ -309,13 +432,11 @@ export default function Investments() {
     setSaving(false)
   }
 
-  // ── Staff: activar/quitar promoción de capitalización compuesta ──
   async function togglePromo(inv) {
     if (isClient) return
     setPromoSavingId(inv.id)
     try {
       if (inv.promo_compound_until) {
-        // Quitar promoción activa
         await supabase.from('investments').update({ promo_compound_until: null }).eq('id', inv.id)
       } else {
         const meses = prompt('¿Por cuántos meses activar la promoción de interés compuesto para esta inversión?', '1')
@@ -329,6 +450,42 @@ export default function Investments() {
       load()
     } catch (err) { alert('❌ ' + err.message) }
     setPromoSavingId(null)
+  }
+
+  // ── FASE B: cliente sube su contrato ya firmado ───────────
+  async function uploadSignedContract(inv, file) {
+    if (!file) return
+    setUploadingContractId(inv.id)
+    try {
+      const ext = file.name.split('.').pop()
+      const path = `investment-docs/${companyId}/signed-contract/${inv.id}-${Date.now()}.${ext}`
+      const { error: err } = await supabase.storage.from('documents').upload(path, file, { upsert: true })
+      if (err) throw err
+      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path)
+      await supabase.from('investments').update({
+        signed_contract_url: urlData.publicUrl,
+        signed_contract_uploaded_at: new Date().toISOString(),
+        contract_confirmed: false,
+      }).eq('id', inv.id)
+      alert('✅ Contrato firmado subido. Queda pendiente de confirmación por el equipo.')
+      load()
+    } catch (err) { alert('❌ Error al subir el contrato firmado: ' + err.message) }
+    setUploadingContractId(null)
+  }
+
+  // ── FASE B: staff confirma el contrato recibido ───────────
+  async function confirmSignedContract(inv) {
+    if (isClient) return
+    setConfirmingContractId(inv.id)
+    try {
+      await supabase.from('investments').update({
+        contract_confirmed: true,
+        contract_confirmed_by: user.id,
+        contract_confirmed_at: new Date().toISOString(),
+      }).eq('id', inv.id)
+      load()
+    } catch (err) { alert('❌ ' + err.message) }
+    setConfirmingContractId(null)
   }
 
   return (
@@ -405,7 +562,6 @@ export default function Investments() {
           </div>
         </div>
 
-        {/* Tabla mensual del simulador */}
         {showSimSchedule && simResult.schedule.length > 0 && (
           <div className="mt-4 pt-4 border-t border-white/20 max-h-48 overflow-y-auto">
             <table className="w-full text-xs">
@@ -449,14 +605,15 @@ export default function Investments() {
                 <th>Código</th><th>Cliente</th><th>Moneda</th><th>Monto</th>
                 <th>Tasa</th><th>Saldo</th><th>Rendimiento</th>
                 <th>Tier</th><th>Estado</th><th>Apertura</th><th>Vencimiento</th>
+                <th>Contrato</th>
                 {!isClient && <th>Promoción</th>}
               </tr>
             </thead>
             <tbody>
               {(loading || (isClient && resolvingClient)) ? (
-                <tr><td colSpan={isClient ? 11 : 12} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
+                <tr><td colSpan={isClient ? 12 : 13} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
               ) : investments.length === 0 ? (
-                <tr><td colSpan={isClient ? 11 : 12}>
+                <tr><td colSpan={isClient ? 12 : 13}>
                   <Empty icon={TrendingUp} title="Sin inversiones" desc={isClient ? 'Aún no tienes depósitos registrados' : 'Registra el primer depósito'} />
                 </td></tr>
               ) : investments.map(inv => {
@@ -487,6 +644,57 @@ export default function Investments() {
                   <td className="text-xs text-hpa-slate-5">{fmtDate(inv.opened_at)}</td>
                   <td className="text-xs text-hpa-slate-5">
                     {inv.maturity_date ? fmtDate(inv.maturity_date) : '—'}
+                  </td>
+                  <td>
+                    {isClient ? (
+                      <div className="flex flex-col gap-1.5 items-start">
+                        <button
+                          className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
+                          onClick={() => generarContratoInversion(inv)}
+                        >
+                          📄 Contrato
+                        </button>
+                        {inv.signed_contract_url ? (
+                          <span className="text-2xs text-hpa-slate-5">
+                            {inv.contract_confirmed ? '✅ Confirmado por la empresa' : '⏳ Subido, esperando confirmación'}
+                          </span>
+                        ) : (
+                          <label className="btn btn-sm btn-ghost border border-hpa-slate-3 cursor-pointer">
+                            <Upload size={12} className="inline mr-1" />
+                            {uploadingContractId === inv.id ? 'Subiendo...' : 'Subir Firmado'}
+                            <input type="file" className="hidden" accept="image/*,.pdf"
+                              disabled={uploadingContractId === inv.id}
+                              onChange={e => uploadSignedContract(inv, e.target.files[0])} />
+                          </label>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5 items-start">
+                        <button
+                          className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
+                          onClick={() => generarContratoInversion(inv)}
+                        >
+                          📄 Contrato
+                        </button>
+                        {inv.signed_contract_url && !inv.contract_confirmed && (
+                          <>
+                            <a href={inv.signed_contract_url} target="_blank" rel="noreferrer"
+                              className="btn btn-sm btn-ghost border border-blue-300 text-blue-700 hover:bg-blue-50">
+                              Ver firmado
+                            </a>
+                            <button
+                              className="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100"
+                              disabled={confirmingContractId === inv.id}
+                              onClick={() => confirmSignedContract(inv)}
+                            >
+                              <FileCheck2 size={12} className="inline mr-1" />
+                              {confirmingContractId === inv.id ? 'Confirmando...' : 'Confirmar'}
+                            </button>
+                          </>
+                        )}
+                        {inv.contract_confirmed && <span className="badge badge-green text-2xs">Confirmado</span>}
+                      </div>
+                    )}
                   </td>
                   {!isClient && (
                     <td>
@@ -521,7 +729,6 @@ export default function Investments() {
           </>
         }>
         <div className="space-y-4">
-          {/* Cliente — solo staff elige, el cliente usa el suyo automáticamente */}
           {!isClient && (
             <Field label="Inversionista (Cliente con KYC aprobado)" required>
               <select className="select" value={form.client_id} onChange={e => fc('client_id', e.target.value)}>
@@ -538,7 +745,6 @@ export default function Investments() {
             </Field>
           )}
 
-          {/* Moneda y monto */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Moneda del depósito" required>
               <select className="select" value={form.currency} onChange={e => fc('currency', e.target.value)}>
@@ -553,7 +759,6 @@ export default function Investments() {
             </Field>
           </div>
 
-          {/* Tasa y plazo */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Tasa mensual (%)" required>
               <input className="input" type="number" step="0.1" placeholder="3.0"
@@ -575,7 +780,6 @@ export default function Investments() {
               value={form.notes} onChange={e => fc('notes', e.target.value)} />
           </Field>
 
-          {/* Preview del rendimiento — interés simple, es el producto real */}
           {form.amount && form.rate_monthly && form.months && (
             <div className="p-4 bg-hpa-slate-1 rounded-xl border border-hpa-slate-2">
               <p className="text-xs font-bold text-hpa-slate-7 mb-3 uppercase tracking-wide">
