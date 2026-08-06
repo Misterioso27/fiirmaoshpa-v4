@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, Plus, X, Calculator } from 'lucide-react'
+import { TrendingUp, Plus, X, Calculator, Sparkles } from 'lucide-react'
 import { db, supabase, fmt, fmtDate, fmtPercent } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -35,7 +35,8 @@ function calcSimulatorSimple({ amount, rate, months }) {
   return { final: balance, yieldTotal: Math.round((yieldMonthly * m) * 100) / 100, schedule }
 }
 
-// ── Interés COMPUESTO — solo para referencia interna del staff, no es el producto real.
+// ── Interés COMPUESTO — solo para referencia interna del staff, no es el producto real
+// salvo que la inversión tenga una promoción activa (promo_compound_until).
 function calcSimulatorCompound({ amount, rate, months }) {
   const p  = parseFloat(amount  || 0)
   const r  = parseFloat(rate    || 0) / 100
@@ -64,6 +65,7 @@ export default function Investments() {
   const [status, setStatus]             = useState('')
   const [myClientId, setMyClientId]     = useState(null)
   const [resolvingClient, setResolvingClient] = useState(isClient)
+  const [promoSavingId, setPromoSavingId] = useState(null)
 
   // Simulador
   const [simAmount, setSimAmount]       = useState(100000)
@@ -128,6 +130,7 @@ export default function Investments() {
           id, investment_code, currency, amount,
           current_balance, accrued_yield, total_yield_paid,
           rate_monthly, tier, status, opened_at, maturity_date,
+          capitalization, promo_compound_until,
           clients(first_name, last_name, client_code, email),
           financial_products(name, code)
         `, { count: 'exact' })
@@ -151,7 +154,11 @@ export default function Investments() {
 
   // ── Abrir modal nuevo depósito ────────────────────────────
   async function openNew() {
-    if (isClient) return // seguridad extra — el botón ya está oculto para este rol
+    if (isClient) {
+      setForm({ client_id: myClientId || '', currency: 'BRL', amount: '', rate_monthly: 3, months: 12, maturity_date: '', notes: '' })
+      setShowModal(true)
+      return
+    }
     setForm({ client_id: '', currency: 'BRL', amount: '', rate_monthly: 3, months: 12, maturity_date: '', notes: '' })
     setShowModal(true)
     try {
@@ -171,8 +178,8 @@ export default function Investments() {
 
   // ── Guardar nuevo depósito ────────────────────────────────
   async function saveInvestment() {
-    if (isClient) return
-    if (!form.client_id)  return alert('Selecciona un cliente')
+    const clientIdToUse = isClient ? myClientId : form.client_id
+    if (!clientIdToUse)   return alert(isClient ? 'No se pudo identificar tu registro de cliente. Contacta a soporte.' : 'Selecciona un cliente')
     if (!form.amount)     return alert('El monto es obligatorio')
     if (!form.rate_monthly) return alert('La tasa mensual es obligatoria')
     setSaving(true)
@@ -206,6 +213,10 @@ export default function Investments() {
         maturity_date = d.toISOString().split('T')[0]
       }
 
+      // Próxima fecha de rendimiento: un mes después de la apertura
+      const nextYield = new Date()
+      nextYield.setMonth(nextYield.getMonth() + 1)
+
       // 1. Crear inversión — capitalización real del producto: SIMPLE
       const { data: inv, error: invErr } = await supabase
         .from('investments')
@@ -213,7 +224,7 @@ export default function Investments() {
           company_id:       companyId,
           branch_id:        branchId,
           investment_code,
-          client_id:        form.client_id,
+          client_id:        clientIdToUse,
           product_id:       null,
           currency:         form.currency,
           amount,
@@ -225,6 +236,7 @@ export default function Investments() {
           status:           'active',
           opened_at:        new Date().toISOString(),
           maturity_date,
+          next_yield_date:  nextYield.toISOString().split('T')[0],
           current_balance:  amount,
           accrued_yield:    0,
           total_yield_paid: 0,
@@ -297,6 +309,28 @@ export default function Investments() {
     setSaving(false)
   }
 
+  // ── Staff: activar/quitar promoción de capitalización compuesta ──
+  async function togglePromo(inv) {
+    if (isClient) return
+    setPromoSavingId(inv.id)
+    try {
+      if (inv.promo_compound_until) {
+        // Quitar promoción activa
+        await supabase.from('investments').update({ promo_compound_until: null }).eq('id', inv.id)
+      } else {
+        const meses = prompt('¿Por cuántos meses activar la promoción de interés compuesto para esta inversión?', '1')
+        if (!meses) { setPromoSavingId(null); return }
+        const n = parseInt(meses)
+        if (!n || n <= 0) { alert('Número de meses inválido'); setPromoSavingId(null); return }
+        const hasta = new Date()
+        hasta.setMonth(hasta.getMonth() + n)
+        await supabase.from('investments').update({ promo_compound_until: hasta.toISOString().split('T')[0] }).eq('id', inv.id)
+      }
+      load()
+    } catch (err) { alert('❌ ' + err.message) }
+    setPromoSavingId(null)
+  }
+
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
@@ -305,11 +339,9 @@ export default function Investments() {
           <h2 className="text-xl font-bold text-hpa-slate-9">Inversiones</h2>
           <p className="text-xs text-hpa-slate-5 mt-0.5">{pagination.total || 0} depósitos{isClient ? ' propios' : ' registrados'}</p>
         </div>
-        {!isClient && (
-          <button className="btn btn-primary" onClick={openNew}>
-            <Plus size={14} /> Nuevo Depósito
-          </button>
-        )}
+        <button className="btn btn-primary" onClick={openNew}>
+          <Plus size={14} /> Nuevo Depósito
+        </button>
       </div>
 
       {/* Simulador */}
@@ -417,16 +449,19 @@ export default function Investments() {
                 <th>Código</th><th>Cliente</th><th>Moneda</th><th>Monto</th>
                 <th>Tasa</th><th>Saldo</th><th>Rendimiento</th>
                 <th>Tier</th><th>Estado</th><th>Apertura</th><th>Vencimiento</th>
+                {!isClient && <th>Promoción</th>}
               </tr>
             </thead>
             <tbody>
               {(loading || (isClient && resolvingClient)) ? (
-                <tr><td colSpan={11} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
+                <tr><td colSpan={isClient ? 11 : 12} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
               ) : investments.length === 0 ? (
-                <tr><td colSpan={11}>
+                <tr><td colSpan={isClient ? 11 : 12}>
                   <Empty icon={TrendingUp} title="Sin inversiones" desc={isClient ? 'Aún no tienes depósitos registrados' : 'Registra el primer depósito'} />
                 </td></tr>
-              ) : investments.map(inv => (
+              ) : investments.map(inv => {
+                const promoActiva = inv.promo_compound_until && inv.promo_compound_until >= new Date().toISOString().split('T')[0]
+                return (
                 <tr key={inv.id}>
                   <td className="font-mono text-xs font-semibold text-hpa-700">{inv.investment_code}</td>
                   <td>
@@ -453,8 +488,21 @@ export default function Investments() {
                   <td className="text-xs text-hpa-slate-5">
                     {inv.maturity_date ? fmtDate(inv.maturity_date) : '—'}
                   </td>
+                  {!isClient && (
+                    <td>
+                      <button
+                        className={`btn btn-sm ${promoActiva ? 'bg-amber-50 border border-amber-300 text-amber-700' : 'btn-ghost border border-hpa-slate-3'}`}
+                        disabled={promoSavingId === inv.id || inv.status !== 'active'}
+                        onClick={() => togglePromo(inv)}
+                        title={promoActiva ? `Activa hasta ${fmtDate(inv.promo_compound_until)}` : 'Activar promoción de interés compuesto'}
+                      >
+                        <Sparkles size={12} className="inline mr-1" />
+                        {promoSavingId === inv.id ? '...' : promoActiva ? `Hasta ${fmtDate(inv.promo_compound_until)}` : 'Activar'}
+                      </button>
+                    </td>
+                  )}
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
@@ -462,7 +510,6 @@ export default function Investments() {
       </div>
 
       {/* ── MODAL NUEVO DEPÓSITO ──────────────────────────────── */}
-      {!isClient && (
       <Modal open={showModal} onClose={() => setShowModal(false)}
         title="Nuevo Depósito de Inversión" size="lg"
         footer={
@@ -474,20 +521,22 @@ export default function Investments() {
           </>
         }>
         <div className="space-y-4">
-          {/* Cliente */}
-          <Field label="Inversionista (Cliente con KYC aprobado)" required>
-            <select className="select" value={form.client_id} onChange={e => fc('client_id', e.target.value)}>
-              <option value="">Seleccionar cliente...</option>
-              {clients.length === 0
-                ? <option disabled>No hay clientes con KYC aprobado</option>
-                : clients.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.first_name} {c.last_name} — {c.client_code}
-                    </option>
-                  ))
-              }
-            </select>
-          </Field>
+          {/* Cliente — solo staff elige, el cliente usa el suyo automáticamente */}
+          {!isClient && (
+            <Field label="Inversionista (Cliente con KYC aprobado)" required>
+              <select className="select" value={form.client_id} onChange={e => fc('client_id', e.target.value)}>
+                <option value="">Seleccionar cliente...</option>
+                {clients.length === 0
+                  ? <option disabled>No hay clientes con KYC aprobado</option>
+                  : clients.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.first_name} {c.last_name} — {c.client_code}
+                      </option>
+                    ))
+                }
+              </select>
+            </Field>
+          )}
 
           {/* Moneda y monto */}
           <div className="grid grid-cols-2 gap-3">
@@ -557,7 +606,6 @@ export default function Investments() {
           )}
         </div>
       </Modal>
-      )}
     </div>
   )
 }
