@@ -3,6 +3,7 @@ import useAuthStore from '@/store/auth'
 import Layout           from '@/components/Layout'
 import PermissionGuard   from '@/components/PermissionGuard'
 import Login       from '@/pages/Login'
+import ResetPassword from '@/pages/ResetPassword'
 import Dashboard   from '@/pages/Dashboard'
 import Clients     from '@/pages/Clients'
 import Investments from '@/pages/Investments'
@@ -25,8 +26,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login"     element={<Login />} />
-        <Route path="/simulator" element={<Simulator />} />
+        <Route path="/login"          element={<Login />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/simulator"      element={<Simulator />} />
         <Route path="/" element={<Guard><Layout /></Guard>}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard"   element={<PermissionGuard module="dashboard"><Dashboard /></PermissionGuard>} />
