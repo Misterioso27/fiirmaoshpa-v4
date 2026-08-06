@@ -21,6 +21,10 @@ const REPRESENTANTE_LEGAL = {
   direccion: '_______________________________________________', // TODO: confirmar dirección exacta de oficina
 }
 
+// ── Firma y sello de la empresa (subidos a Supabase Storage) ────
+const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-cesar.png'
+const SELLO_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Sellos/a0000000-0000-4000-8000-000000000001/sello-empresa.png'
+
 function fmtCurrency(amount, currency = 'DOP') {
   const c = CURRENCIES[currency] || CURRENCIES.DOP
   return `${c.symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -179,7 +183,7 @@ async function generarPagare(item) {
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Times New Roman', Times, serif; font-size: 13.5px; line-height: 1.8; color: #000; background: #fff; }
-  .page { max-width: 780px; margin: 0 auto; padding: 50px 60px; }
+  .page { position: relative; max-width: 780px; margin: 0 auto; padding: 50px 60px; }
   .header { text-align: center; margin-bottom: 30px; }
   .logo-outer { border: 3px double #000; display: inline-block; padding: 10px 30px; margin-bottom: 12px; }
   .logo-name { font-size: 15px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase; }
@@ -195,6 +199,13 @@ async function generarPagare(item) {
   .firma-box { text-align: center; }
   .firma-linea { border-top: 1px solid #000; padding-top: 8px; margin-top: 70px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
   .firma-cargo { font-size: 11px; font-weight: 400; color: #333; margin-top: 2px; }
+  .sello-marca { position: absolute; top: 40px; right: 45px; width: 130px; height: 130px; opacity: 0.9; pointer-events: none; }
+  .endoso-empresa { margin-top: 55px; padding-top: 18px; border-top: 1px dashed #C9A84C; display: flex; align-items: flex-end; justify-content: center; gap: 18px; }
+  .endoso-firma-img { height: 60px; object-fit: contain; }
+  .endoso-texto { text-align: center; }
+  .endoso-texto .nombre { font-size: 12px; font-weight: 700; text-transform: uppercase; border-top: 1px solid #000; padding-top: 4px; min-width: 260px; }
+  .endoso-texto .cargo { font-size: 10px; color: #555; margin-top: 2px; }
+  .endoso-texto .label { font-size: 9px; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
   @media print {
     body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     .page { padding: 30px 40px; }
@@ -203,6 +214,7 @@ async function generarPagare(item) {
 </head>
 <body>
 <div class="page">
+  <img src="${SELLO_URL}" class="sello-marca" alt="Sello" />
   <div class="header">
     <div class="logo-outer">
       <div class="logo-name">Financiera e Inversiones Irmaos HPA SRL</div>
@@ -234,6 +246,14 @@ async function generarPagare(item) {
   <div class="firma-grid" style="margin-top:50px">
     <div class="firma-box"><div class="firma-linea">BERNARDO ALEXANDER LOPEZ BAEZ</div><div class="firma-cargo">TESTIGO</div></div>
     <div class="firma-box"><div class="firma-linea">DOCTOR GERIS RODOLFO LEON ENCARNACIÓN</div><div class="firma-cargo">NOTARIO PÚBLICO</div></div>
+  </div>
+  <div class="endoso-empresa">
+    <img src="${FIRMA_URL}" class="endoso-firma-img" alt="Firma" />
+    <div class="endoso-texto">
+      <div class="label">Endosado por la Financiera</div>
+      <div class="nombre">${REPRESENTANTE_LEGAL.nombre}</div>
+      <div class="cargo">${REPRESENTANTE_LEGAL.cargo}</div>
+    </div>
   </div>
 </div>
 <script>window.onload = function() { window.print() }</script>
