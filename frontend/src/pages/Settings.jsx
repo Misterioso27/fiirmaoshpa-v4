@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Building2, Package, Plus, Edit2, Save, User, Globe, Type, Upload } from 'lucide-react'
+import { Building2, Package, Plus, Edit2, Save, User, Globe, Type, Upload, Landmark, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Tabs, Field, Spinner, Modal, Empty } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -23,6 +23,12 @@ const CONFIG_LABELS = {
   support_phone:                { label: 'Teléfono de Soporte',            type: 'text'   },
 }
 
+const PAISES = [
+  { value: 'DO', flag: '🇩🇴', label: 'República Dominicana', currency: 'DOP' },
+  { value: 'BR', flag: '🇧🇷', label: 'Brasil',                currency: 'BRL' },
+  { value: 'US', flag: '🇺🇸', label: 'Estados Unidos',        currency: 'USD' },
+]
+
 export default function Settings() {
   const { user, preferences, updatePreferences } = useAuthStore()
   const companyId = user?.company?.id || COMPANY_ID
@@ -43,6 +49,14 @@ export default function Settings() {
   const [branches, setBranches]   = useState([])
   const [registers, setRegisters] = useState([])
 
+  // Cuentas bancarias (Fase F)
+  const [bankAccounts, setBankAccounts]           = useState([])
+  const [loadingBanks, setLoadingBanks]           = useState(false)
+  const [showBankModal, setShowBankModal]         = useState(false)
+  const [editingBank, setEditingBank]             = useState(null)
+  const [bankForm, setBankForm]                   = useState({})
+  const [savingBank, setSavingBank]               = useState(false)
+
   // Preferencias locales
   const [localPrefs, setLocalPrefs] = useState({
     font_size: preferences?.font_size || 'normal',
@@ -56,6 +70,7 @@ export default function Settings() {
   const TABS = [
     { id: 'company',     label: '🏢 Empresa'      },
     { id: 'products',    label: '📦 Productos'     },
+    { id: 'banks',       label: '🌎 Cuentas Bancarias' },
     { id: 'cash',        label: '🏦 Cajas'         },
     { id: 'system',      label: '⚙️ Sistema'       },
     { id: 'preferences', label: '🎨 Preferencias'  },
@@ -104,7 +119,17 @@ export default function Settings() {
     } catch (e) { console.error(e) }
   }, [companyId])
 
-  useEffect(() => { loadConfig(); loadProducts(); loadCash() }, [loadConfig, loadProducts, loadCash])
+  const loadBankAccounts = useCallback(async () => {
+    if (!companyId) return
+    setLoadingBanks(true)
+    try {
+      const { data } = await supabase.from('bank_accounts').select('*').eq('company_id', companyId).order('country').order('is_primary', { ascending: false })
+      setBankAccounts(data || [])
+    } catch (e) { console.error(e) }
+    setLoadingBanks(false)
+  }, [companyId])
+
+  useEffect(() => { loadConfig(); loadProducts(); loadCash(); loadBankAccounts() }, [loadConfig, loadProducts, loadCash, loadBankAccounts])
 
   async function saveConfig() {
     if (!Object.keys(configDirty).length) return
@@ -222,6 +247,80 @@ export default function Settings() {
 
   function pfv(k, v) { setProductForm(f => ({ ...f, [k]: v })) }
 
+  // ── Cuentas Bancarias (Fase F) ─────────────────────────────
+  function openBankModal(account = null) {
+    setEditingBank(account)
+    setBankForm(account ? { ...account } : {
+      country: 'DO', currency: 'DOP', label: '', bank_name: '',
+      holder_name: 'Financiera e Inversiones Irmaos HPA SRL',
+      account_number: '', iban: '', swift_bic: '', routing_aba: '', pix_key: '',
+      is_primary: false, is_active: true,
+    })
+    setShowBankModal(true)
+  }
+
+  function bfv(k, v) {
+    setBankForm(f => {
+      const next = { ...f, [k]: v }
+      if (k === 'country') {
+        const pais = PAISES.find(p => p.value === v)
+        if (pais) next.currency = pais.currency
+      }
+      return next
+    })
+  }
+
+  async function saveBankAccount() {
+    if (!bankForm.bank_name || !bankForm.account_number || !bankForm.label)
+      return alert('Etiqueta, banco y número de cuenta son obligatorios')
+    setSavingBank(true)
+    try {
+      const payload = {
+        company_id:     companyId,
+        country:        bankForm.country,
+        currency:       bankForm.currency,
+        label:          bankForm.label,
+        bank_name:      bankForm.bank_name,
+        holder_name:    bankForm.holder_name || null,
+        account_number: bankForm.account_number,
+        iban:           bankForm.iban || null,
+        swift_bic:      bankForm.swift_bic || null,
+        routing_aba:    bankForm.routing_aba || null,
+        pix_key:        bankForm.pix_key || null,
+        is_primary:     bankForm.is_primary || false,
+        is_active:      bankForm.is_active !== false,
+      }
+      let error
+      if (editingBank?.id) {
+        const res = await supabase.from('bank_accounts').update(payload).eq('id', editingBank.id)
+        error = res.error
+      } else {
+        const res = await supabase.from('bank_accounts').insert(payload)
+        error = res.error
+      }
+      if (error) throw new Error(error.message)
+      setShowBankModal(false)
+      await loadBankAccounts()
+      alert(`✅ Cuenta bancaria ${editingBank ? 'actualizada' : 'creada'}`)
+    } catch (err) { alert('❌ ' + err.message) }
+    setSavingBank(false)
+  }
+
+  async function toggleBankActive(account) {
+    try {
+      await supabase.from('bank_accounts').update({ is_active: !account.is_active }).eq('id', account.id)
+      await loadBankAccounts()
+    } catch (err) { alert('❌ ' + err.message) }
+  }
+
+  async function deleteBankAccount(account) {
+    if (!confirm(`¿Eliminar la cuenta "${account.label}"? Esta acción no se puede deshacer.`)) return
+    try {
+      await supabase.from('bank_accounts').delete().eq('id', account.id)
+      await loadBankAccounts()
+    } catch (err) { alert('❌ ' + err.message) }
+  }
+
   if (loading) return <div className="flex justify-center py-16"><Spinner size={24} /></div>
 
   return (
@@ -298,6 +397,52 @@ export default function Settings() {
                           <td><button className="btn btn-ghost btn-sm btn-icon" onClick={() => openProductModal(p)}><Edit2 size={13} /></button></td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── CUENTAS BANCARIAS (Fase F) ────────────────────── */}
+          {tab === 'banks' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="form-section-title mb-0">Cuentas Bancarias por País</p>
+                  <p className="text-xs text-hpa-slate-5">El cliente verá estas cuentas al elegir su país/moneda para transferir</p>
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={() => openBankModal()}>
+                  <Plus size={13} /> Nueva Cuenta
+                </button>
+              </div>
+              {loadingBanks ? <div className="py-8 flex justify-center"><Spinner size={20} /></div>
+              : bankAccounts.length === 0 ? <Empty icon={Landmark} title="Sin cuentas bancarias" desc="Agrega la primera cuenta para que los clientes puedan transferir" />
+              : (
+                <div className="table-wrapper">
+                  <table className="table text-xs">
+                    <thead><tr><th>País</th><th>Etiqueta</th><th>Banco</th><th>Cuenta</th><th>Moneda</th><th>Principal</th><th>Estado</th><th>Acciones</th></tr></thead>
+                    <tbody>
+                      {bankAccounts.map(acc => {
+                        const pais = PAISES.find(p => p.value === acc.country)
+                        return (
+                          <tr key={acc.id}>
+                            <td>{pais ? `${pais.flag} ${pais.label}` : acc.country}</td>
+                            <td className="font-semibold">{acc.label}</td>
+                            <td>{acc.bank_name}</td>
+                            <td className="font-mono">{acc.account_number}{acc.pix_key ? ` · PIX: ${acc.pix_key}` : ''}</td>
+                            <td><span className="badge badge-blue">{acc.currency}</span></td>
+                            <td>{acc.is_primary && <span className="badge badge-gold">Principal</span>}</td>
+                            <td><button className={`badge cursor-pointer ${acc.is_active ? 'badge-green' : 'badge-gray'}`} onClick={() => toggleBankActive(acc)}>{acc.is_active ? 'ACTIVA' : 'INACTIVA'}</button></td>
+                            <td>
+                              <div className="flex gap-1">
+                                <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openBankModal(acc)}><Edit2 size={13} /></button>
+                                <button className="btn btn-ghost btn-sm btn-icon text-red-500" onClick={() => deleteBankAccount(acc)}><Trash2 size={13} /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -565,6 +710,80 @@ export default function Settings() {
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" className="rounded" checked={productForm.is_active !== false} onChange={e => pfv('is_active', e.target.checked)} />
               <span className="text-sm text-hpa-slate-7">Producto activo</span>
+            </label>
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL CUENTA BANCARIA (Fase F) */}
+      <Modal open={showBankModal} onClose={() => setShowBankModal(false)}
+        title={editingBank ? 'Editar Cuenta Bancaria' : 'Nueva Cuenta Bancaria'} size="lg"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setShowBankModal(false)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={saveBankAccount} disabled={savingBank}>
+              {savingBank ? <Spinner size={14} /> : <><Save size={14} /> {editingBank ? 'Actualizar' : 'Crear'} Cuenta</>}
+            </button>
+          </>
+        }>
+        <div className="space-y-4">
+          <Field label="País" required>
+            <div className="grid grid-cols-3 gap-2">
+              {PAISES.map(pais => (
+                <button key={pais.value} type="button"
+                  className={`p-3 rounded-lg border-2 text-center transition-all ${bankForm.country === pais.value ? 'border-hpa-700 bg-hpa-700/5' : 'border-hpa-slate-2 hover:border-hpa-slate-3'}`}
+                  onClick={() => bfv('country', pais.value)}>
+                  <p className="text-xl">{pais.flag}</p>
+                  <p className="text-2xs font-semibold text-hpa-slate-8 mt-1">{pais.label}</p>
+                </button>
+              ))}
+            </div>
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Etiqueta (nombre visible)" required>
+              <input className="input" placeholder="Ej: Cuenta principal RD" value={bankForm.label || ''} onChange={e => bfv('label', e.target.value)} />
+            </Field>
+            <Field label="Moneda">
+              <input className="input" value={bankForm.currency || ''} readOnly />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Banco" required>
+              <input className="input" placeholder="Ej: Banreservas" value={bankForm.bank_name || ''} onChange={e => bfv('bank_name', e.target.value)} />
+            </Field>
+            <Field label="Titular de la cuenta">
+              <input className="input" value={bankForm.holder_name || ''} onChange={e => bfv('holder_name', e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Número de cuenta" required>
+            <input className="input" value={bankForm.account_number || ''} onChange={e => bfv('account_number', e.target.value)} />
+          </Field>
+          {bankForm.country === 'BR' && (
+            <Field label="Clave PIX">
+              <input className="input" placeholder="CPF/CNPJ, email, teléfono o clave aleatoria" value={bankForm.pix_key || ''} onChange={e => bfv('pix_key', e.target.value)} />
+            </Field>
+          )}
+          {bankForm.country === 'US' && (
+            <Field label="Routing Number (ABA)">
+              <input className="input" value={bankForm.routing_aba || ''} onChange={e => bfv('routing_aba', e.target.value)} />
+            </Field>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="SWIFT/BIC (transferencia internacional)">
+              <input className="input" value={bankForm.swift_bic || ''} onChange={e => bfv('swift_bic', e.target.value)} />
+            </Field>
+            <Field label="IBAN (si aplica)">
+              <input className="input" value={bankForm.iban || ''} onChange={e => bfv('iban', e.target.value)} />
+            </Field>
+          </div>
+          <div className="flex gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="rounded" checked={bankForm.is_primary || false} onChange={e => bfv('is_primary', e.target.checked)} />
+              <span className="text-sm text-hpa-slate-7">Cuenta principal de este país</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="rounded" checked={bankForm.is_active !== false} onChange={e => bfv('is_active', e.target.checked)} />
+              <span className="text-sm text-hpa-slate-7">Cuenta activa</span>
             </label>
           </div>
         </div>
