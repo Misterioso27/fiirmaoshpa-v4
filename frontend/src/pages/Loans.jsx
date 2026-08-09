@@ -22,7 +22,7 @@ const REPRESENTANTE_LEGAL = {
 }
 
 // ── Firma y sello de la empresa (subidos a Supabase Storage) ────
-const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-transparente.png'
+const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-cesar.png'
 const SELLO_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Sellos/a0000000-0000-4000-8000-000000000001/sello-empresa.png'
 
 function fmtCurrency(amount, currency = 'DOP') {
@@ -199,8 +199,8 @@ async function generarPagare(item) {
   .firma-box { text-align: center; }
   .firma-linea { border-top: 1px solid #000; padding-top: 8px; margin-top: 70px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
   .firma-cargo { font-size: 11px; font-weight: 400; color: #333; margin-top: 2px; }
-  .sello-marca { position: absolute; top: 40px; right: 45px; width: 130px; height: 130px; opacity: 0.9; pointer-events: none; }
-  .endoso-empresa { margin-top: 55px; padding-top: 18px; border-top: 1px dashed #C9A84C; display: flex; align-items: flex-end; justify-content: center; gap: 18px; }
+  .endoso-empresa { margin-top: 55px; padding-top: 18px; border-top: 1px dashed #C9A84C; display: flex; align-items: center; justify-content: center; gap: 24px; }
+  .endoso-sello-img { width: 90px; height: 90px; object-fit: contain; flex-shrink: 0; }
   .endoso-firma-img { height: 60px; object-fit: contain; }
   .endoso-texto { text-align: center; }
   .endoso-texto .nombre { font-size: 12px; font-weight: 700; text-transform: uppercase; border-top: 1px solid #000; padding-top: 4px; min-width: 260px; }
@@ -214,7 +214,6 @@ async function generarPagare(item) {
 </head>
 <body>
 <div class="page">
-  <img src="${SELLO_URL}" class="sello-marca" alt="Sello" />
   <div class="header">
     <div class="logo-outer">
       <div class="logo-name">Financiera e Inversiones Irmaos HPA SRL</div>
@@ -248,6 +247,7 @@ async function generarPagare(item) {
     <div class="firma-box"><div class="firma-linea">DOCTOR GERIS RODOLFO LEON ENCARNACIÓN</div><div class="firma-cargo">NOTARIO PÚBLICO</div></div>
   </div>
   <div class="endoso-empresa">
+    <img src="${SELLO_URL}" class="endoso-sello-img" alt="Sello" />
     <img src="${FIRMA_URL}" class="endoso-firma-img" alt="Firma" />
     <div class="endoso-texto">
       <div class="label">Endosado por la Financiera</div>
