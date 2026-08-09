@@ -20,7 +20,7 @@ const REPRESENTANTE_LEGAL = {
   direccion: '_______________________________________________', // TODO: confirmar dirección exacta de oficina
 }
 
-const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-cesar.png'
+const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-transparente.png'
 const SELLO_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Sellos/a0000000-0000-4000-8000-000000000001/sello-empresa.png'
 
 function fmtC(amount, currency = 'DOP') {
