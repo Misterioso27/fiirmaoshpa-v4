@@ -6,7 +6,7 @@ export default function PermissionGuard({ module, action = 'can_view', staffOnly
   const { user, hasPermission } = useAuthStore()
   if (!user) return <Navigate to="/login" replace />
   const isClient = user?.role?.code === 'client'
-  const blocked = (staffOnly && isClient) || !hasPermission(module, action)
+  const blocked = (staffOnly && isClient) || (module !== 'dashboard' && !hasPermission(module, action))
   if (blocked) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center px-6">
