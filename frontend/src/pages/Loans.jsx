@@ -549,14 +549,16 @@ export default function Loans() {
       )
       await supabase.from('collection_cases').insert({ company_id: companyId, branch_id: branchId, client_id: item.client_id, loan_id: loanData.id, stage: 'preventive', status: 'open', days_overdue: 0, amount_overdue: 0, installments_due: 0 })
       if (disbursalForm.method === 'cash') {
-        const { data: openReg } = await supabase.from('cash_registers').select('id').eq('company_id', companyId).eq('status', 'open').limit(1).single()
+        const { data: openReg } = await supabase.from('cash_registers').select('id').eq('company_id', companyId).eq('status', 'open').eq('currency', currency).limit(1).maybeSingle()
         if (openReg) {
-          const { data: openSession } = await supabase.from('cash_sessions').select('id, opening_balance, total_income, total_expense').eq('register_id', openReg.id).eq('status', 'open').single()
+          const { data: openSession } = await supabase.from('cash_sessions').select('id, opening_balance, total_income, total_expense').eq('register_id', openReg.id).eq('status', 'open').maybeSingle()
           if (openSession) {
             const { count: mvCount } = await supabase.from('cash_movements').select('*', { count: 'exact', head: true }).eq('session_id', openSession.id)
             const current = (openSession.opening_balance || 0) + (openSession.total_income || 0) - (openSession.total_expense || 0)
             await supabase.from('cash_movements').insert({ session_id: openSession.id, company_id: companyId, movement_number: `MV-${String((mvCount || 0) + 1).padStart(4, '0')}`, type: 'expense', category: 'loan_disbursement', reference_type: 'loan', reference_id: loanData.id, amount: monto, currency, fx_rate: 1, amount_base: monto, balance_after: Math.max(0, current - monto), description: `Desembolso préstamo ${loan_code}`, client_id: item.client_id, created_by: user.id })
           }
+        } else {
+          alert(`⚠️ No hay una caja en ${currency} abierta — el desembolso se completó pero no quedó registrado en ninguna caja. Abre una sesión de caja en ${currency} y regístralo manualmente si hace falta.`)
         }
       }
       setShowDisbursalModal(false); setDisbursalItem(null); load()
