@@ -20,7 +20,7 @@ const REPRESENTANTE_LEGAL = {
   direccion: '_______________________________________________', // TODO: confirmar dirección exacta de oficina
 }
 
-const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-transparente.png'
+const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-cesar.png'
 const SELLO_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Sellos/a0000000-0000-4000-8000-000000000001/sello-empresa.png'
 
 function fmtC(amount, currency = 'DOP') {
@@ -127,8 +127,8 @@ function generarContratoInversion(inv) {
   .gold-sep { border: none; border-top: 2px solid #C9A84C; margin: 20px 0; }
   .condiciones { border: 1px solid #ddd; border-radius: 6px; padding: 14px 18px; margin: 18px 0; font-size: 12px; }
   .condiciones div { display: flex; justify-content: space-between; padding: 3px 0; }
-  .sello-marca { position: absolute; top: 40px; right: 45px; width: 120px; height: 120px; opacity: 0.9; pointer-events: none; }
   .firma-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; margin-top: 50px; }
+  .firma-sello-img { width: 70px; height: 70px; object-fit: contain; margin-bottom: 4px; }
   .firma-box { text-align: center; }
   .firma-linea { border-top: 1px solid #000; padding-top: 8px; margin-top: 70px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
   .firma-cargo { font-size: 11px; color: #333; margin-top: 2px; }
@@ -139,7 +139,6 @@ function generarContratoInversion(inv) {
 </head>
 <body>
 <div class="page">
-  <img src="${SELLO_URL}" class="sello-marca" alt="Sello" />
   <div class="header">
     <div class="logo-outer">
       <div class="logo-name">Financiera e Inversiones Irmaos HPA SRL</div>
@@ -176,6 +175,7 @@ function generarContratoInversion(inv) {
       <div class="firma-cargo">EL INVERSIONISTA</div>
     </div>
     <div class="firma-box">
+      <img src="${SELLO_URL}" class="firma-sello-img" alt="Sello" />
       <img src="${FIRMA_URL}" class="firma-img" alt="Firma" /><br/>
       <div class="firma-linea" style="margin-top:8px">${REPRESENTANTE_LEGAL.nombre}</div>
       <div class="firma-cargo">${REPRESENTANTE_LEGAL.cargo} — LA FINANCIERA</div>
