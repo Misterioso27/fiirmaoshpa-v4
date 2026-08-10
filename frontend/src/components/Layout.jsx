@@ -8,6 +8,7 @@ import {
 import { clsx } from 'clsx'
 import useAuthStore from '@/store/auth'
 import { useState, useRef, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
 import CurrencyTicker from '@/components/CurrencyTicker'
 import BannerCarousel from '@/components/BannerCarousel'
 
@@ -128,7 +129,7 @@ function ProfileDropdown({ user, onLogout }) {
   )
 }
 
-function Sidebar({ open, onClose }) {
+function Sidebar({ open, onClose, bannerPosition }) {
   const { user, logout, hasPermission } = useAuthStore()
   const navigate = useNavigate()
   const isClient = user?.role?.code === 'client'
@@ -178,8 +179,8 @@ function Sidebar({ open, onClose }) {
           <div className="gold-bar mt-4" style={{ opacity: 0.4 }} />
         </div>
 
-        {/* Banner lateral — solo staff (visualmente identificado como espacio publicitario) */}
-        {!isClient && (
+        {/* Banner lateral — solo staff, y solo si esa es la ubicación elegida */}
+        {!isClient && bannerPosition === 'sidebar' && (
           <div className="px-3 pt-3">
             <BannerCarousel position="sidebar" />
           </div>
@@ -223,7 +224,7 @@ function Sidebar({ open, onClose }) {
   )
 }
 
-function Header({ onMenuToggle }) {
+function Header({ onMenuToggle, bannerPosition }) {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
 
@@ -241,12 +242,17 @@ function Header({ onMenuToggle }) {
         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
         <Menu size={20} />
       </button>
-      <div className="hidden lg:flex items-center gap-4">
-        <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
+      <div className="hidden lg:flex items-center gap-4 flex-1 min-w-0 mx-4">
+        <p className="text-xs flex-shrink-0" style={{ color: 'rgba(255,255,255,0.35)' }}>
           {new Date().toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
-        <div className="w-px h-4" style={{ background: 'var(--dark-border)' }} />
+        <div className="w-px h-4 flex-shrink-0" style={{ background: 'var(--dark-border)' }} />
         <CurrencyTicker />
+        {bannerPosition === 'header' && (
+          <div className="flex-1 min-w-0 max-w-md">
+            <BannerCarousel position="header" />
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-2 ml-auto">
         <button className="relative p-2 rounded-lg transition-colors"
@@ -266,20 +272,34 @@ function Header({ onMenuToggle }) {
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [bannerPosition, setBannerPosition] = useState('footer')
   const { user } = useAuthStore()
   const isClient = user?.role?.code === 'client'
+  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('system_config')
+          .select('value')
+          .eq('company_id', companyId)
+          .eq('key', 'banner_position')
+          .maybeSingle()
+        if (data?.value) setBannerPosition(data.value)
+      } catch (e) { console.error(e) }
+    })()
+  }, [companyId])
 
   return (
     <div className="min-h-screen bg-hpa-slate-2">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} bannerPosition={bannerPosition} />
       <div className="transition-all duration-300 lg:ml-[240px]" style={{ paddingTop: 'var(--header-height)' }}>
-        <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
+        <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} bannerPosition={bannerPosition} />
         <main className="p-4 md:p-6 space-y-4">
-          {/* Banner superior — visible para todos, es la vitrina publicitaria de la app */}
-          <BannerCarousel position="dashboard_top" />
+          {bannerPosition === 'dashboard_top' && <BannerCarousel position="dashboard_top" />}
           <Outlet />
-          {/* Banner de pie — visible para todos */}
-          <BannerCarousel position="footer" />
+          {bannerPosition === 'footer' && <BannerCarousel position="footer" />}
         </main>
       </div>
     </div>
