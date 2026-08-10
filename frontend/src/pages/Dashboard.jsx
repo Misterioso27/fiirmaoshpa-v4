@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, TrendingDown, CreditCard, Landmark, Users, AlertTriangle, Clock, CheckCircle, RefreshCw } from 'lucide-react'
+import { TrendingUp, TrendingDown, CreditCard, Landmark, Users, AlertTriangle, Clock, CheckCircle, RefreshCw, Wallet, CalendarClock } from 'lucide-react'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { supabase, fmt } from '@/lib/supabase'
+import { db, supabase, fmt } from '@/lib/supabase'
 import useAuthStore from '@/store/auth'
 
 const CURRENCIES = {
@@ -13,6 +13,11 @@ const CURRENCIES = {
 function fmtC(amount, currency = 'DOP') {
   const c = CURRENCIES[currency] || CURRENCIES.DOP
   return `${c.symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function fmtDateShort(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('es-DO', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 function KpiCard({ label, value, sub, change, icon: Icon, color = 'blue', loading }) {
@@ -56,10 +61,133 @@ const alertColor = {
   task:     'text-hpa-slate-5 bg-hpa-slate-2',
 }
 
+// ── VISTA DEL CLIENTE — solo sus propios datos, nunca los de la empresa ──
+function ClientDashboard({ user }) {
+  const [loading, setLoading] = useState(true)
+  const [resolvingClient, setResolvingClient] = useState(true)
+  const [myClientId, setMyClientId] = useState(null)
+  const [data, setData] = useState({
+    loansBalance: 0, loansCurrency: 'DOP', activeLoans: 0,
+    investmentsBalance: 0, investmentsCurrency: 'BRL', activeInvestments: 0,
+    nextPayment: null, overdueCount: 0,
+  })
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const c = await db.getClientByUserId(user.id)
+        setMyClientId(c?.id || null)
+      } catch (e) { console.error(e) }
+      setResolvingClient(false)
+    })()
+  }, [user?.id])
+
+  useEffect(() => {
+    if (resolvingClient) return
+    if (!myClientId) { setLoading(false); return }
+    (async () => {
+      setLoading(true)
+      try {
+        const { data: loans } = await supabase
+          .from('loans')
+          .select('id, balance_total, currency, days_overdue, status')
+          .eq('client_id', myClientId)
+          .in('status', ['active', 'overdue'])
+
+        const { data: invests } = await supabase
+          .from('investments')
+          .select('current_balance, currency, status')
+          .eq('client_id', myClientId)
+          .eq('status', 'active')
+
+        const loanIds = (loans || []).map(l => l.id)
+        let nextPayment = null
+        if (loanIds.length > 0) {
+          const { data: schedule } = await supabase
+            .from('loan_schedule')
+            .select('due_date, total_due, loan_id')
+            .in('loan_id', loanIds)
+            .eq('status', 'pending')
+            .order('due_date', { ascending: true })
+            .limit(1)
+          nextPayment = schedule?.[0] || null
+        }
+
+        const loansBalance = (loans || []).reduce((s, l) => s + parseFloat(l.balance_total || 0), 0)
+        const investmentsBalance = (invests || []).reduce((s, i) => s + parseFloat(i.current_balance || 0), 0)
+        const overdueCount = (loans || []).filter(l => l.days_overdue > 0).length
+
+        setData({
+          loansBalance, loansCurrency: loans?.[0]?.currency || 'DOP', activeLoans: (loans || []).length,
+          investmentsBalance, investmentsCurrency: invests?.[0]?.currency || 'BRL', activeInvestments: (invests || []).length,
+          nextPayment, overdueCount,
+        })
+      } catch (e) { console.error(e) }
+      setLoading(false)
+    })()
+  }, [resolvingClient, myClientId])
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div>
+        <h2 className="text-xl font-bold text-hpa-slate-9">
+          Bienvenido, {user?.full_name?.split(' ')[0] || 'Cliente'} 👋
+        </h2>
+        <p className="text-sm text-hpa-slate-5 mt-0.5">
+          {new Date().toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+        </p>
+      </div>
+
+      {!resolvingClient && !myClientId ? (
+        <div className="card p-6 text-center">
+          <p className="text-sm text-hpa-slate-6">No se pudo identificar tu registro de cliente. Contacta a soporte.</p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <KpiCard
+              label="Mi Saldo en Préstamos"
+              value={fmtC(data.loansBalance, data.loansCurrency)}
+              sub={`${data.activeLoans} préstamo${data.activeLoans !== 1 ? 's' : ''} activo${data.activeLoans !== 1 ? 's' : ''}${data.overdueCount > 0 ? ` · ${data.overdueCount} en mora` : ''}`}
+              icon={CreditCard} color={data.overdueCount > 0 ? 'red' : 'blue'} loading={loading || resolvingClient}
+            />
+            <KpiCard
+              label="Mi Saldo en Inversiones"
+              value={fmtC(data.investmentsBalance, data.investmentsCurrency)}
+              sub={`${data.activeInvestments} depósito${data.activeInvestments !== 1 ? 's' : ''} activo${data.activeInvestments !== 1 ? 's' : ''}`}
+              icon={TrendingUp} color="gold" loading={loading || resolvingClient}
+            />
+          </div>
+
+          <div className="card">
+            <h3 className="text-sm font-semibold text-hpa-slate-9 mb-4 flex items-center gap-2">
+              <CalendarClock size={15} className="text-hpa-700" /> Próximo Pago
+            </h3>
+            {loading || resolvingClient ? (
+              <div className="h-10 bg-hpa-slate-1 rounded animate-pulse" />
+            ) : data.nextPayment ? (
+              <div className="flex items-center justify-between p-4 bg-hpa-slate-1 rounded-xl">
+                <div>
+                  <p className="text-xs text-hpa-slate-5">Vence el</p>
+                  <p className="text-sm font-bold text-hpa-slate-9">{fmtDateShort(data.nextPayment.due_date)}</p>
+                </div>
+                <p className="text-lg font-bold text-hpa-700 font-numeric">{fmtC(data.nextPayment.total_due, data.loansCurrency)}</p>
+              </div>
+            ) : (
+              <p className="text-sm text-hpa-slate-5">No tienes cuotas pendientes por el momento.</p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
   const currency  = user?.company?.currency_base || 'DOP'
+  const isClient  = user?.role?.code === 'client'
 
   const [loading, setLoading]       = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -82,9 +210,9 @@ export default function Dashboard() {
   const [inversionesData, setInversionesData] = useState([])
   const [resumen, setResumen]       = useState([])
 
-  // ── Cargar todos los KPIs desde Supabase ─────────────────
+  // ── Cargar todos los KPIs desde Supabase (solo staff) ────
   const loadDashboard = useCallback(async () => {
-    if (!companyId) return
+    if (!companyId || isClient) return
     setLoading(true)
     try {
       const [
@@ -269,7 +397,7 @@ export default function Dashboard() {
 
     } catch (e) { console.error('Dashboard error:', e) }
     setLoading(false)
-  }, [companyId])
+  }, [companyId, isClient])
 
   useEffect(() => { loadDashboard() }, [loadDashboard])
 
@@ -278,6 +406,9 @@ export default function Dashboard() {
     await loadDashboard()
     setRefreshing(false)
   }
+
+  // ── Rol Cliente: vista propia, nunca los números de la empresa ──
+  if (isClient) return <ClientDashboard user={user} />
 
   return (
     <div className="space-y-6 animate-fade-in">
