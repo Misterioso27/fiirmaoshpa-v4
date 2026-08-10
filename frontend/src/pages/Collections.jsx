@@ -50,11 +50,11 @@ export default function Collections() {
   const [revertReason, setRevertReason]       = useState('')
   const [reverting, setReverting]             = useState(false)
 
-  // Caja
-  const [openSession, setOpenSession]         = useState(null)
+  // Caja — ahora una sesión abierta POR MONEDA, no una sola global
+  const [openSessions, setOpenSessions]       = useState({}) // { DOP: {...}, BRL: {...}, USD: {...} }
   const [loadingSession, setLoadingSession]   = useState(false)
 
-  // ── Buscar sesión de caja abierta ─────────────────────────
+  // ── Buscar todas las sesiones de caja abiertas, agrupadas por moneda ──
   const fetchOpenSession = useCallback(async () => {
     if (!companyId) return
     setLoadingSession(true)
@@ -64,18 +64,21 @@ export default function Collections() {
         .select('id, name, currency, status')
         .eq('company_id', companyId)
         .eq('status', 'open')
-        .limit(1)
 
       if (registers?.length) {
-        const { data: session } = await supabase
-          .from('cash_sessions')
-          .select('id, opening_balance, total_income, total_expense, register_id, cash_registers(name, currency)')
-          .eq('register_id', registers[0].id)
-          .eq('status', 'open')
-          .single()
-        setOpenSession(session || null)
+        const sessionsByCurrency = {}
+        await Promise.all(registers.map(async reg => {
+          const { data: session } = await supabase
+            .from('cash_sessions')
+            .select('id, opening_balance, total_income, total_expense, register_id, cash_registers(name, currency)')
+            .eq('register_id', reg.id)
+            .eq('status', 'open')
+            .maybeSingle()
+          if (session) sessionsByCurrency[reg.currency] = session
+        }))
+        setOpenSessions(sessionsByCurrency)
       } else {
-        setOpenSession(null)
+        setOpenSessions({})
       }
     } catch (e) { console.error(e) }
     setLoadingSession(false)
@@ -154,21 +157,22 @@ export default function Collections() {
     } catch (e) { console.error(e) }
   }
 
-  // ── Registrar cobro en caja ───────────────────────────────
+  // ── Registrar cobro en caja — en la caja de la MISMA moneda del préstamo ──
   async function registerCashMovement(loanCode, clientId, monto, currency, loanId) {
-    if (!openSession) return false
+    const session = openSessions[currency]
+    if (!session) return false
     try {
       const { count: mvCount } = await supabase
         .from('cash_movements')
         .select('*', { count: 'exact', head: true })
-        .eq('session_id', openSession.id)
+        .eq('session_id', session.id)
 
-      const current = (openSession.opening_balance || 0) +
-                      (openSession.total_income    || 0) -
-                      (openSession.total_expense   || 0)
+      const current = (session.opening_balance || 0) +
+                      (session.total_income    || 0) -
+                      (session.total_expense   || 0)
 
       const { error } = await supabase.from('cash_movements').insert({
-        session_id:     openSession.id,
+        session_id:     session.id,
         company_id:     companyId,
         movement_number:`MV-${String((mvCount || 0) + 1).padStart(4, '0')}`,
         type:           'income',
@@ -187,11 +191,11 @@ export default function Collections() {
 
       if (error) throw error
 
-      // Actualizar totales de la sesión en estado local
-      setOpenSession(prev => prev ? {
+      // Actualizar totales de esa sesión en estado local
+      setOpenSessions(prev => ({
         ...prev,
-        total_income: (prev.total_income || 0) + monto
-      } : prev)
+        [currency]: { ...prev[currency], total_income: (prev[currency]?.total_income || 0) + monto }
+      }))
 
       return true
     } catch (e) {
@@ -262,7 +266,7 @@ export default function Collections() {
         updated_at:       new Date().toISOString()
       }).eq('id', selected.id)
 
-      // 4. Registrar en caja si hay sesión abierta
+      // 4. Registrar en caja si hay sesión abierta EN ESA MONEDA
       const registradoEnCaja = await registerCashMovement(
         selected.loans?.loan_code,
         selected.clients?.id,
@@ -280,7 +284,7 @@ export default function Collections() {
         `✅ Cobro aplicado correctamente.\n` +
         `Cuota #${cuota.installment_num} — ${fmtCurrency(monto, currency)}\n` +
         `Balance restante: ${fmtCurrency(nuevoBalanceTotal, currency)}\n` +
-        `${registradoEnCaja ? '🏦 Registrado en caja automáticamente.' : '⚠️ Sin caja abierta — registra el movimiento manualmente.'}\n` +
+        `${registradoEnCaja ? '🏦 Registrado en caja automáticamente.' : `⚠️ Sin caja abierta en ${currency} — registra el movimiento manualmente.`}\n` +
         `${loanStatus === 'paid' ? '🎉 Préstamo completamente cancelado.' : ''}`
       )
     } catch (err) {
@@ -345,19 +349,20 @@ export default function Collections() {
         updated_at:     new Date().toISOString()
       }).eq('id', selected.id)
 
-      // 4. Registrar movimiento inverso en caja si hay sesión abierta
-      if (openSession && montoPagado > 0) {
+      // 4. Registrar movimiento inverso en caja EN ESA MONEDA si hay sesión abierta
+      const session = openSessions[currency]
+      if (session && montoPagado > 0) {
         const { count: mvCount } = await supabase
           .from('cash_movements')
           .select('*', { count: 'exact', head: true })
-          .eq('session_id', openSession.id)
+          .eq('session_id', session.id)
 
-        const current = (openSession.opening_balance || 0) +
-                        (openSession.total_income    || 0) -
-                        (openSession.total_expense   || 0)
+        const current = (session.opening_balance || 0) +
+                        (session.total_income    || 0) -
+                        (session.total_expense   || 0)
 
         await supabase.from('cash_movements').insert({
-          session_id:     openSession.id,
+          session_id:     session.id,
           company_id:     companyId,
           movement_number:`MV-${String((mvCount || 0) + 1).padStart(4, '0')}`,
           type:           'adjustment',
@@ -374,10 +379,10 @@ export default function Collections() {
           created_by:     user?.id,
         })
 
-        setOpenSession(prev => prev ? {
+        setOpenSessions(prev => ({
           ...prev,
-          total_income: Math.max(0, (prev.total_income || 0) - montoPagado)
-        } : prev)
+          [currency]: { ...prev[currency], total_income: Math.max(0, (prev[currency]?.total_income || 0) - montoPagado) }
+        }))
       }
 
       // 5. Registrar acción de auditoría
@@ -401,7 +406,7 @@ export default function Collections() {
         `↩️ Reversión aplicada.\n` +
         `Cuota #${cuota.installment_num} vuelve a estado pendiente.\n` +
         `Balance restaurado: ${fmtCurrency(balanceRestaurado, currency)}\n` +
-        `${openSession ? '🏦 Movimiento inverso registrado en caja.' : ''}\n` +
+        `${openSessions[currency] ? '🏦 Movimiento inverso registrado en caja.' : ''}\n` +
         `Motivo: "${revertReason}"`
       )
     } catch (err) {
@@ -440,6 +445,7 @@ export default function Collections() {
   const cuotasPendientes = schedule.filter(s => s.status === 'pending' || s.status === 'overdue').length
   const proximaCuota     = schedule.find(s => s.status === 'pending' || s.status === 'overdue')
   const currency         = selected?.loans?.currency || 'DOP'
+  const sessionForSelected = selected ? openSessions[currency] : null
 
   return (
     <div className="h-[calc(100vh-120px)] flex gap-4 animate-fade-in">
@@ -451,13 +457,24 @@ export default function Collections() {
           <p className="text-xs text-hpa-slate-5">{pagination.total || 0} casos activos</p>
         </div>
 
-        {/* Estado de caja */}
-        <div className={`mb-3 p-2.5 rounded-lg border text-xs flex items-center gap-2 ${openSession ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-          <Building2 size={13} className="flex-shrink-0" />
-          {loadingSession ? 'Verificando caja...' :
-           openSession
-            ? `🏦 Caja abierta: ${openSession.cash_registers?.name || 'Caja'}`
-            : '⚠️ Sin caja abierta — cobros no se suman automáticamente'}
+        {/* Estado de caja — por moneda */}
+        <div className="mb-3 space-y-1.5">
+          {loadingSession ? (
+            <div className="p-2.5 rounded-lg border bg-hpa-slate-1 border-hpa-slate-2 text-xs text-hpa-slate-5">
+              Verificando cajas...
+            </div>
+          ) : Object.keys(openSessions).length === 0 ? (
+            <div className="p-2.5 rounded-lg border bg-amber-50 border-amber-200 text-amber-800 text-xs flex items-center gap-2">
+              <Building2 size={13} className="flex-shrink-0" /> ⚠️ Sin cajas abiertas — los cobros no se registrarán en caja
+            </div>
+          ) : (
+            Object.entries(openSessions).map(([curr, sess]) => (
+              <div key={curr} className="p-2.5 rounded-lg border bg-emerald-50 border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                <Building2 size={13} className="flex-shrink-0" />
+                🏦 {sess.cash_registers?.name || 'Caja'} ({curr}) abierta
+              </div>
+            ))
+          )}
         </div>
 
         <div className="mb-3">
@@ -535,13 +552,13 @@ export default function Collections() {
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-sm font-semibold text-hpa-slate-9">Aplicar Cobro</h4>
-                {openSession ? (
+                {sessionForSelected ? (
                   <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                    <Building2 size={11} /> Se sumará a caja automáticamente
+                    <Building2 size={11} /> Se sumará a la caja en {currency} automáticamente
                   </span>
                 ) : (
                   <span className="text-xs text-amber-600 font-semibold flex items-center gap-1">
-                    <Building2 size={11} /> Sin caja abierta
+                    <Building2 size={11} /> Sin caja abierta en {currency}
                   </span>
                 )}
               </div>
@@ -675,7 +692,7 @@ export default function Collections() {
                 <p className="text-xs font-bold text-amber-800">Esta acción revertirá el pago registrado.</p>
                 <p className="text-xs text-amber-700 mt-0.5">
                   La cuota vuelve a pendiente y el balance se restaura.
-                  {openSession ? ' Se registrará un movimiento inverso en caja.' : ''}
+                  {sessionForSelected ? ' Se registrará un movimiento inverso en caja.' : ''}
                   Queda registrado en auditoría.
                 </p>
               </div>
