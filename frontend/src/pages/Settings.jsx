@@ -526,6 +526,33 @@ export default function Settings() {
           {tab === 'preferences' && (
             <div className="max-w-lg space-y-6">
 
+              {/* Ubicación del banner publicitario */}
+              <div>
+                <p className="form-section-title">Ubicación del Banner Publicitario</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { value: 'header',        label: 'Encabezado' },
+                    { value: 'dashboard_top', label: 'Arriba del contenido' },
+                    { value: 'footer',        label: 'Pie de página' },
+                    { value: 'sidebar',       label: 'Barra lateral' },
+                  ].map(pos => (
+                    <button key={pos.value} type="button"
+                      className={`p-3 rounded-xl border-2 text-center transition-all cursor-pointer ${
+                        (config.banner_position || 'footer') === pos.value
+                          ? 'border-hpa-700 bg-hpa-700/5'
+                          : 'border-hpa-slate-2 hover:border-hpa-slate-3'
+                      }`}
+                      onClick={() => setConfigVal('banner_position', pos.value)}>
+                      <p className="text-sm font-semibold text-hpa-slate-9">{pos.label}</p>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-hpa-slate-4 mt-2">Solo se muestra en un lugar a la vez.</p>
+                <button className="btn btn-primary mt-3" onClick={saveConfig} disabled={saving || !Object.keys(configDirty).length}>
+                  {saving ? <Spinner size={14} /> : <><Save size={14} /> Guardar Ubicación</>}
+                </button>
+              </div>
+
               {/* Logo de la empresa */}
               <div>
                 <p className="form-section-title">Logo de la Empresa</p>
