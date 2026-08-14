@@ -14,7 +14,8 @@ function TradingViewFallback({ position }) {
 
   useEffect(() => {
     if (!ref.current) return
-    ref.current.innerHTML = ''
+    // TradingView exige un div interno con esta clase exacta antes del script — sin esto el widget nunca se pinta
+    ref.current.innerHTML = '<div class="tradingview-widget-container__widget"></div>'
     const script = document.createElement('script')
     script.src = `https://s3.tradingview.com/external-embedding/embed-widget-${cfg.widget}.js`
     script.async = true
@@ -28,7 +29,7 @@ function TradingViewFallback({ position }) {
 
   return (
     <div className="w-full overflow-hidden rounded-xl border border-hpa-slate-2 bg-white relative" style={{ height: cfg.height }}>
-      <div ref={ref} className="w-full h-full" />
+      <div ref={ref} className="tradingview-widget-container w-full h-full" />
       <span className="absolute top-1 right-2 text-2xs text-hpa-slate-4 bg-white/80 px-1 rounded">Espacio disponible para publicidad</span>
     </div>
   )
