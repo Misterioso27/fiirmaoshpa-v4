@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { TrendingUp, Plus, X, Calculator, Sparkles, Upload, FileCheck2 } from 'lucide-react'
 import { db, supabase, fmt, fmtDate, fmtPercent } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner } from '@/components/ui'
+import BankTransferInfo from '@/components/BankTransferInfo'
 import useAuthStore from '@/store/auth'
 
 const CURRENCIES = {
@@ -12,12 +13,33 @@ const CURRENCIES = {
   GBP: { symbol: '£',   flag: '🇬🇧' },
 }
 
-// ── Representante legal fijo de la empresa (mismo que en Pagarés de préstamos) ────
-const REPRESENTANTE_LEGAL = {
+// ── Representante legal — valores por defecto; se sobreescriben con lo guardado en Settings (system_config) ──
+const REPRESENTANTE_LEGAL_DEFAULT = {
   nombre: 'CÉSAR AUGUSTO DE LOS SANTOS PEREZ',
   cargo: 'Gerente de Operaciones / CEO / Co-Propietario',
   cedula: '224-0001237-7',
-  direccion: '_______________________________________________', // TODO: confirmar dirección exacta de oficina
+  direccion: '_______________________________________________',
+}
+
+async function resolverRepresentanteLegal(companyId) {
+  try {
+    const { data } = await supabase
+      .from('system_config')
+      .select('key, value')
+      .eq('company_id', companyId)
+      .in('key', ['legal_rep_nombre', 'legal_rep_cargo', 'legal_rep_cedula', 'legal_rep_direccion'])
+    const map = {}
+    ;(data || []).forEach(r => { map[r.key] = r.value })
+    return {
+      nombre:    map.legal_rep_nombre    || REPRESENTANTE_LEGAL_DEFAULT.nombre,
+      cargo:     map.legal_rep_cargo     || REPRESENTANTE_LEGAL_DEFAULT.cargo,
+      cedula:    map.legal_rep_cedula    || REPRESENTANTE_LEGAL_DEFAULT.cedula,
+      direccion: map.legal_rep_direccion || REPRESENTANTE_LEGAL_DEFAULT.direccion,
+    }
+  } catch (e) {
+    console.error(e)
+    return REPRESENTANTE_LEGAL_DEFAULT
+  }
 }
 
 const FIRMA_URL = 'https://ylodmopafxauvwurfweh.supabase.co/storage/v1/object/public/documents/Firmas/a0000000-0000-4000-8000-000000000001/firma-cesar.png'
@@ -95,7 +117,8 @@ function numeroALetras(n) {
 }
 
 // ── Genera el documento de Contrato de Inversión (privado, NO es un pagaré notarial) ──
-function generarContratoInversion(inv) {
+async function generarContratoInversion(inv) {
+  const REPRESENTANTE_LEGAL = await resolverRepresentanteLegal(inv.company_id || 'a0000000-0000-4000-8000-000000000001')
   const cliente = `${inv.clients?.first_name || ''} ${inv.clients?.last_name || ''}`.trim().toUpperCase()
   const cedula  = inv.clients?.client_code || '_______________'
   const monto   = parseFloat(inv.amount || 0)
@@ -779,6 +802,10 @@ export default function Investments() {
             <textarea className="input h-16 resize-none" placeholder="Condiciones especiales, observaciones..."
               value={form.notes} onChange={e => fc('notes', e.target.value)} />
           </Field>
+
+          {isClient && (
+            <BankTransferInfo companyId={companyId} defaultCountry="DO" />
+          )}
 
           {form.amount && form.rate_monthly && form.months && (
             <div className="p-4 bg-hpa-slate-1 rounded-xl border border-hpa-slate-2">

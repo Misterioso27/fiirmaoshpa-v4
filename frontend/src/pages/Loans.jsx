@@ -3,6 +3,7 @@ import { Plus, CreditCard, Calculator, Upload, ShieldAlert,
          CheckCircle2, Edit2, CheckSquare, XSquare, DollarSign, Building2, FileCheck2 } from 'lucide-react'
 import { db, supabase, fmt, fmtDate } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Pagination, Empty, Spinner, Tabs } from '@/components/ui'
+import BankTransferInfo from '@/components/BankTransferInfo'
 import useAuthStore from '@/store/auth'
 
 const CURRENCIES = {
@@ -13,12 +14,33 @@ const CURRENCIES = {
   GBP: { symbol: '£',   label: 'Libra Esterlina', flag: '🇬🇧' },
 }
 
-// ── Representante legal fijo de la empresa (pagarés) ────────
-const REPRESENTANTE_LEGAL = {
+// ── Representante legal — valores por defecto; se sobreescriben con lo guardado en Settings (system_config) ──
+const REPRESENTANTE_LEGAL_DEFAULT = {
   nombre: 'CÉSAR AUGUSTO DE LOS SANTOS PEREZ',
   cargo: 'Gerente de Operaciones / CEO / Co-Propietario',
   cedula: '224-0001237-7',
-  direccion: '_______________________________________________', // TODO: confirmar dirección exacta de oficina
+  direccion: '_______________________________________________',
+}
+
+async function resolverRepresentanteLegal(companyId) {
+  try {
+    const { data } = await supabase
+      .from('system_config')
+      .select('key, value')
+      .eq('company_id', companyId)
+      .in('key', ['legal_rep_nombre', 'legal_rep_cargo', 'legal_rep_cedula', 'legal_rep_direccion'])
+    const map = {}
+    ;(data || []).forEach(r => { map[r.key] = r.value })
+    return {
+      nombre:    map.legal_rep_nombre    || REPRESENTANTE_LEGAL_DEFAULT.nombre,
+      cargo:     map.legal_rep_cargo     || REPRESENTANTE_LEGAL_DEFAULT.cargo,
+      cedula:    map.legal_rep_cedula    || REPRESENTANTE_LEGAL_DEFAULT.cedula,
+      direccion: map.legal_rep_direccion || REPRESENTANTE_LEGAL_DEFAULT.direccion,
+    }
+  } catch (e) {
+    console.error(e)
+    return REPRESENTANTE_LEGAL_DEFAULT
+  }
 }
 
 // ── Firma y sello de la empresa (subidos a Supabase Storage) ────
@@ -129,6 +151,7 @@ async function resolverGestor(item) {
 
 async function generarPagare(item) {
   const gestorNombre = await resolverGestor(item)
+  const REPRESENTANTE_LEGAL = await resolverRepresentanteLegal(item.company_id || 'a0000000-0000-4000-8000-000000000001')
 
   const ai      = item.ai_analysis || {}
   const cliente = `${item.clients?.first_name || ''} ${item.clients?.last_name || ''}`.trim().toUpperCase()
@@ -298,6 +321,7 @@ export default function Loans() {
   const [resolvingClient, setResolvingClient] = useState(isClient)
   const [uploadingPagareId, setUploadingPagareId] = useState(null)
   const [confirmingPagareId, setConfirmingPagareId] = useState(null)
+  const [showBankInfo, setShowBankInfo] = useState(false)
 
   // ── Si el usuario es rol Cliente, resuelve su client_id una sola vez ──
   useEffect(() => {
@@ -656,6 +680,12 @@ export default function Loans() {
                               onClick={() => generarPagare(item)}
                             >
                               📄 Pagaré
+                            </button>
+                            <button
+                              className="btn btn-sm btn-ghost border border-blue-300 text-blue-700 hover:bg-blue-50"
+                              onClick={() => setShowBankInfo(true)}
+                            >
+                              🏦 ¿Dónde pagar?
                             </button>
                             {ai.signed_pagare_url ? (
                               <span className="text-2xs text-hpa-slate-5">
@@ -1029,6 +1059,15 @@ export default function Loans() {
             )}
           </div>
         )}
+      </Modal>
+      )}
+
+      {/* MODAL — DÓNDE PAGAR (cliente) */}
+      {isClient && (
+      <Modal open={showBankInfo} onClose={() => setShowBankInfo(false)} title="Cuentas para tu pago" size="md"
+        footer={<button className="btn btn-ghost" onClick={() => setShowBankInfo(false)}>Cerrar</button>}>
+        <BankTransferInfo companyId={companyId} defaultCountry="DO" />
+        <p className="text-xs text-hpa-slate-5 mt-3">Después de transferir, envía el comprobante a soporte para que se aplique el pago a tu cuota.</p>
       </Modal>
       )}
     </div>
