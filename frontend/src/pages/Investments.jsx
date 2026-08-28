@@ -357,10 +357,12 @@ export default function Investments() {
 
       const investment_code = `HPA-I-${String((count || 0) + 1).padStart(4, '0')}`
 
+      // Vencimiento = apertura + 1 mes de tolerancia (para que el capital "entre a trabajar") + plazo
+      // El inversionista no pierde ese mes — solo se corre el vencimiento un mes hacia adelante.
       let maturity_date = form.maturity_date || null
       if (!maturity_date && form.months) {
         const d = new Date()
-        d.setMonth(d.getMonth() + parseInt(form.months))
+        d.setMonth(d.getMonth() + 1 + parseInt(form.months))
         maturity_date = d.toISOString().split('T')[0]
       }
 
