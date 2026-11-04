@@ -50,8 +50,7 @@ function fmtC(amount, currency = 'DOP') {
   return `${c.symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-// ── Interés SIMPLE — es el producto real que se le vende al cliente:
-// rendimiento fijo cada mes sobre el capital original, no se acumula sobre sí mismo.
+// ── Interés SIMPLE — rendimiento fijo mensual sobre el capital original
 function calcSimulatorSimple({ amount, rate, months }) {
   const p = parseFloat(amount || 0)
   const r = parseFloat(rate   || 0) / 100
@@ -68,8 +67,7 @@ function calcSimulatorSimple({ amount, rate, months }) {
   return { final: balance, yieldTotal: Math.round((yieldMonthly * m) * 100) / 100, schedule }
 }
 
-// ── Interés COMPUESTO — solo para referencia interna del staff, no es el producto real
-// salvo que la inversión tenga una promoción activa (promo_compound_until).
+// ── Interés COMPUESTO — referencia interna del staff
 function calcSimulatorCompound({ amount, rate, months }) {
   const p  = parseFloat(amount  || 0)
   const r  = parseFloat(rate    || 0) / 100
@@ -116,7 +114,15 @@ function numeroALetras(n) {
   return { str: intToStr(parseInt(partes[0])), cents: partes[1] || '00' }
 }
 
-// ── Genera el documento de Contrato de Inversión (privado, NO es un pagaré notarial) ──
+// ── Función unificada para calcular el vencimiento sumando 1 mes de gracia + el plazo en meses ──
+function calcularFechaVencimiento(openedAtDate, termMonths) {
+  const d = new Date(openedAtDate || Date.now())
+  const mesesTotales = 1 + parseInt(termMonths || 12) // 1 mes de gracia/desplazamiento + plazo pactado
+  d.setMonth(d.getMonth() + mesesTotales)
+  return d.toISOString().split('T')[0]
+}
+
+// ── Genera el documento de Contrato de Inversión ──
 async function generarContratoInversion(inv) {
   const REPRESENTANTE_LEGAL = await resolverRepresentanteLegal(inv.company_id || 'a0000000-0000-4000-8000-000000000001')
   const cliente = `${inv.clients?.first_name || ''} ${inv.clients?.last_name || ''}`.trim().toUpperCase()
@@ -136,28 +142,28 @@ async function generarContratoInversion(inv) {
 <title>Contrato de Inversión — ${inv.investment_code || ''}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Times New Roman', Times, serif; font-size: 13.5px; line-height: 1.8; color: #000; background: #fff; }
-  .page { position: relative; max-width: 780px; margin: 0 auto; padding: 50px 60px; }
-  .header { text-align: center; margin-bottom: 30px; }
-  .logo-outer { border: 3px double #000; display: inline-block; padding: 10px 30px; margin-bottom: 12px; }
-  .logo-name { font-size: 15px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase; }
-  .logo-sub  { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #333; }
-  .titulo { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin: 16px 0 4px; text-decoration: underline; }
-  .aviso { font-size: 10px; color: #999; text-align: center; margin-bottom: 16px; font-style: italic; }
+  body { font-family: 'Times New Roman', Times, serif; font-size: 13px; line-height: 1.7; color: #000; background: #fff; }
+  .page { position: relative; max-width: 780px; margin: 0 auto; padding: 40px 50px; }
+  .header { text-align: center; margin-bottom: 25px; }
+  .logo-outer { border: 3px double #000; display: inline-block; padding: 8px 25px; margin-bottom: 10px; }
+  .logo-name { font-size: 14px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase; }
+  .logo-sub  { font-size: 9.5px; letter-spacing: 1px; text-transform: uppercase; color: #333; }
+  .titulo { font-size: 15px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin: 12px 0 4px; text-decoration: underline; }
+  .aviso { font-size: 10px; color: #777; text-align: center; margin-bottom: 12px; font-style: italic; }
   .cuerpo { text-align: justify; }
-  .cuerpo p { margin-bottom: 14px; }
-  .ref-box { border: 1px solid #ccc; padding: 8px 14px; font-size: 11px; color: #555; margin-bottom: 20px; display: flex; justify-content: space-between; }
-  .gold-sep { border: none; border-top: 2px solid #C9A84C; margin: 20px 0; }
-  .condiciones { border: 1px solid #ddd; border-radius: 6px; padding: 14px 18px; margin: 18px 0; font-size: 12px; }
-  .condiciones div { display: flex; justify-content: space-between; padding: 3px 0; }
-  .firma-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; margin-top: 50px; }
-  .firma-sello-img { width: 70px; height: 70px; object-fit: contain; margin-bottom: 4px; }
+  .cuerpo p { margin-bottom: 10px; }
+  .ref-box { border: 1px solid #ccc; padding: 6px 12px; font-size: 11px; color: #555; margin-bottom: 15px; display: flex; justify-content: space-between; }
+  .gold-sep { border: none; border-top: 2px solid #C9A84C; margin: 15px 0; }
+  .condiciones { border: 1px solid #ddd; border-radius: 6px; padding: 12px 16px; margin: 15px 0; font-size: 11.5px; }
+  .condiciones div { display: flex; justify-content: space-between; padding: 2.5px 0; }
+  .clausula-especial { background: #fdfbf7; border-left: 3px solid #C9A84C; padding: 10px 12px; margin: 12px 0; font-size: 11.5px; }
+  .firma-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 35px; }
+  .firma-sello-img { width: 65px; height: 65px; object-fit: contain; margin-bottom: 2px; }
   .firma-box { text-align: center; }
-  .firma-linea { border-top: 1px solid #000; padding-top: 8px; margin-top: 70px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
-  .firma-cargo { font-size: 11px; color: #333; margin-top: 2px; }
-  .firma-img-box { text-align: center; }
-  .firma-img { height: 60px; object-fit: contain; }
-  @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } .page { padding: 30px 40px; } }
+  .firma-linea { border-top: 1px solid #000; padding-top: 6px; margin-top: 55px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; }
+  .firma-cargo { font-size: 10.5px; color: #333; margin-top: 2px; }
+  .firma-img { height: 50px; object-fit: contain; }
+  @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } .page { padding: 25px 35px; } }
 </style>
 </head>
 <body>
@@ -189,6 +195,11 @@ async function generarContratoInversion(inv) {
     </div>
 
     <p>EL INVERSIONISTA declara haber entregado a LA FINANCIERA la suma indicada arriba, la cual será administrada según el modelo de negocio de LA FINANCIERA, generando el rendimiento mensual pactado hasta la fecha de vencimiento o hasta que las partes acuerden su liquidación anticipada.</p>
+    
+    <div class="clausula-especial">
+      <strong>PARÁGRAFO / CLÁUSULA DE PERÍODO DE GRACIA Y DESPLAZAMIENTO:</strong> Se establece un período inicial de un (1) mes de gracia y desplazamiento operativo para la colocación y puesta en marcha del capital. Este mes inicial se añade al plazo total del contrato recorriendo la fecha de vencimiento un mes hacia adelante sin alterar la vigencia ni los beneficios globales del inversionista. Asimismo, se estipula expresamente que <strong>tanto EL INVERSIONISTA como LA FINANCIERA se reservan el derecho potestativo de cancelar, rescindir o rechazar la inversión durante este primer mes inicial</strong>, sin que dicha decisión genere derecho a indemnización, penalidad o reclamación legal de ninguna especie para ninguna de las partes.
+    </div>
+
     <p>LA FINANCIERA se compromete a informar a EL INVERSIONISTA del estado de su inversión a través de la plataforma digital de la empresa, y a realizar los pagos de rendimiento y/o liquidación de capital según las condiciones aquí pactadas.</p>
     <p>Ambas partes firman el presente contrato en señal de conformidad con lo aquí establecido.</p>
   </div>
@@ -200,7 +211,7 @@ async function generarContratoInversion(inv) {
     <div class="firma-box">
       <img src="${SELLO_URL}" class="firma-sello-img" alt="Sello" />
       <img src="${FIRMA_URL}" class="firma-img" alt="Firma" /><br/>
-      <div class="firma-linea" style="margin-top:8px">${REPRESENTANTE_LEGAL.nombre}</div>
+      <div class="firma-linea" style="margin-top:6px">${REPRESENTANTE_LEGAL.nombre}</div>
       <div class="firma-cargo">${REPRESENTANTE_LEGAL.cargo} — LA FINANCIERA</div>
     </div>
   </div>
@@ -357,13 +368,10 @@ export default function Investments() {
 
       const investment_code = `HPA-I-${String((count || 0) + 1).padStart(4, '0')}`
 
-      // Vencimiento = apertura + 1 mes de tolerancia (para que el capital "entre a trabajar") + plazo
-      // El inversionista no pierde ese mes — solo se corre el vencimiento un mes hacia adelante.
+      // Vencimiento automático aplicando la función de 1 mes de gracia + plazo en meses
       let maturity_date = form.maturity_date || null
       if (!maturity_date && form.months) {
-        const d = new Date()
-        d.setMonth(d.getMonth() + 1 + parseInt(form.months))
-        maturity_date = d.toISOString().split('T')[0]
+        maturity_date = calcularFechaVencimiento(new Date(), form.months)
       }
 
       const nextYield = new Date()
@@ -372,26 +380,26 @@ export default function Investments() {
       const { data: inv, error: invErr } = await supabase
         .from('investments')
         .insert({
-          company_id:       companyId,
-          branch_id:        branchId,
+          company_id:        companyId,
+          branch_id:         branchId,
           investment_code,
-          client_id:        clientIdToUse,
-          product_id:       null,
-          currency:         form.currency,
+          client_id:         clientIdToUse,
+          product_id:        null,
+          currency:          form.currency,
           amount,
-          amount_base:      parseFloat(amountBRL.toFixed(2)),
-          fx_rate_at_open:  1,
-          rate_monthly:     parseFloat(form.rate_monthly),
+          amount_base:       parseFloat(amountBRL.toFixed(2)),
+          fx_rate_at_open:   1,
+          rate_monthly:      parseFloat(form.rate_monthly),
           tier,
-          capitalization:   'simple',
-          status:           'active',
-          opened_at:        new Date().toISOString(),
+          capitalization:    'simple',
+          status:            'active',
+          opened_at:         new Date().toISOString(),
           maturity_date,
-          next_yield_date:  nextYield.toISOString().split('T')[0],
-          current_balance:  amount,
-          accrued_yield:    0,
-          total_yield_paid: 0,
-          created_by:       user.id,
+          next_yield_date:   nextYield.toISOString().split('T')[0],
+          current_balance:   amount,
+          accrued_yield:     0,
+          total_yield_paid:  0,
+          created_by:        user.id,
         })
         .select()
         .single()
@@ -451,7 +459,7 @@ export default function Investments() {
         `Código: ${investment_code}\n` +
         `Monto: ${fmtC(amount, form.currency)}\n` +
         `Tasa: ${form.rate_monthly}% mensual (interés simple) · Tier: ${tier.toUpperCase()}\n` +
-        `Vencimiento: ${maturity_date || '—'}`
+        `Vencimiento (con mes de gracia): ${maturity_date || '—'}`
       )
     } catch (err) { alert('❌ ' + err.message) }
     setSaving(false)
@@ -477,7 +485,6 @@ export default function Investments() {
     setPromoSavingId(null)
   }
 
-  // ── FASE B: cliente sube su contrato ya firmado ───────────
   async function uploadSignedContract(inv, file) {
     if (!file) return
     setUploadingContractId(inv.id)
@@ -498,7 +505,6 @@ export default function Investments() {
     setUploadingContractId(null)
   }
 
-  // ── FASE B: staff confirma el contrato recibido ───────────
   async function confirmSignedContract(inv) {
     if (isClient) return
     setConfirmingContractId(inv.id)
@@ -671,66 +677,45 @@ export default function Investments() {
                     {inv.maturity_date ? fmtDate(inv.maturity_date) : '—'}
                   </td>
                   <td>
-                    {isClient ? (
-                      <div className="flex flex-col gap-1.5 items-start">
-                        <button
-                          className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
-                          onClick={() => generarContratoInversion(inv)}
-                        >
-                          📄 Contrato
-                        </button>
-                        {inv.signed_contract_url ? (
-                          <span className="text-2xs text-hpa-slate-5">
-                            {inv.contract_confirmed ? '✅ Confirmado por la empresa' : '⏳ Subido, esperando confirmación'}
+                    <div className="flex flex-col gap-1.5 items-start">
+                      <button
+                        className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
+                        onClick={() => generarContratoInversion(inv)}
+                      >
+                        📄 Contrato
+                      </button>
+                      {isClient && (
+                        inv.signed_contract_url ? (
+                          <span className="text-2xs text-emerald-600 font-medium flex items-center gap-1">
+                            <FileCheck2 size={12} /> {inv.contract_confirmed ? 'Confirmado' : 'En revisión'}
                           </span>
                         ) : (
-                          <label className="btn btn-sm btn-ghost border border-hpa-slate-3 cursor-pointer">
-                            <Upload size={12} className="inline mr-1" />
-                            {uploadingContractId === inv.id ? 'Subiendo...' : 'Subir Firmado'}
-                            <input type="file" className="hidden" accept="image/*,.pdf"
-                              disabled={uploadingContractId === inv.id}
-                              onChange={e => uploadSignedContract(inv, e.target.files[0])} />
+                          <label className="btn btn-xs btn-outline cursor-pointer">
+                            <Upload size={12} /> Subir firmado
+                            <input type="file" className="hidden" accept=".pdf,image/*" onChange={e => uploadSignedContract(inv, e.target.files?.[0])} />
                           </label>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-1.5 items-start">
+                        )
+                      )}
+                      {!isClient && inv.signed_contract_url && !inv.contract_confirmed && (
                         <button
-                          className="btn btn-sm btn-ghost border border-amber-300 text-amber-700 hover:bg-amber-50"
-                          onClick={() => generarContratoInversion(inv)}
+                          className="btn btn-xs btn-primary"
+                          disabled={confirmingContractId === inv.id}
+                          onClick={() => confirmSignedContract(inv)}
                         >
-                          📄 Contrato
+                          {confirmingContractId === inv.id ? 'Confirmando...' : 'Validar firma'}
                         </button>
-                        {inv.signed_contract_url && !inv.contract_confirmed && (
-                          <>
-                            <a href={inv.signed_contract_url} target="_blank" rel="noreferrer"
-                              className="btn btn-sm btn-ghost border border-blue-300 text-blue-700 hover:bg-blue-50">
-                              Ver firmado
-                            </a>
-                            <button
-                              className="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100"
-                              disabled={confirmingContractId === inv.id}
-                              onClick={() => confirmSignedContract(inv)}
-                            >
-                              <FileCheck2 size={12} className="inline mr-1" />
-                              {confirmingContractId === inv.id ? 'Confirmando...' : 'Confirmar'}
-                            </button>
-                          </>
-                        )}
-                        {inv.contract_confirmed && <span className="badge badge-green text-2xs">Confirmado</span>}
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </td>
                   {!isClient && (
                     <td>
                       <button
-                        className={`btn btn-sm ${promoActiva ? 'bg-amber-50 border border-amber-300 text-amber-700' : 'btn-ghost border border-hpa-slate-3'}`}
-                        disabled={promoSavingId === inv.id || inv.status !== 'active'}
+                        className={`badge cursor-pointer ${promoActiva ? 'badge-gold' : 'badge-gray'}`}
+                        disabled={promoSavingId === inv.id}
                         onClick={() => togglePromo(inv)}
-                        title={promoActiva ? `Activa hasta ${fmtDate(inv.promo_compound_until)}` : 'Activar promoción de interés compuesto'}
+                        title="Activar/desactivar interés compuesto promocional"
                       >
-                        <Sparkles size={12} className="inline mr-1" />
-                        {promoSavingId === inv.id ? '...' : promoActiva ? `Hasta ${fmtDate(inv.promo_compound_until)}` : 'Activar'}
+                        {promoActiva ? `Compuesto hasta ${inv.promo_compound_until}` : 'Activar Promo'}
                       </button>
                     </td>
                   )}
@@ -739,104 +724,63 @@ export default function Investments() {
             </tbody>
           </table>
         </div>
-        <Pagination page={page} pages={pagination.pages} total={pagination.total} limit={20} onChange={setPage} />
+        <Pagination pagination={pagination} onPageChange={p => setPage(p)} />
       </div>
 
-      {/* ── MODAL NUEVO DEPÓSITO ──────────────────────────────── */}
-      <Modal open={showModal} onClose={() => setShowModal(false)}
-        title="Nuevo Depósito de Inversión" size="lg"
-        footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={saveInvestment} disabled={saving}>
-              {saving ? <Spinner size={14} /> : '✓ Registrar Depósito'}
-            </button>
-          </>
-        }>
+      {/* Modal Nuevo Depósito */}
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Registrar Nuevo Depósito de Inversión">
         <div className="space-y-4">
           {!isClient && (
-            <Field label="Inversionista (Cliente con KYC aprobado)" required>
-              <select className="select" value={form.client_id} onChange={e => fc('client_id', e.target.value)}>
-                <option value="">Seleccionar cliente...</option>
-                {clients.length === 0
-                  ? <option disabled>No hay clientes con KYC aprobado</option>
-                  : clients.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.first_name} {c.last_name} — {c.client_code}
-                      </option>
-                    ))
-                }
-              </select>
-            </Field>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Moneda del depósito" required>
-              <select className="select" value={form.currency} onChange={e => fc('currency', e.target.value)}>
-                {Object.entries(CURRENCIES).map(([k, v]) => (
-                  <option key={k} value={k}>{v.flag} {k} — {k === 'BRL' ? 'Real Brasileño' : k === 'DOP' ? 'Peso Dominicano' : k === 'USD' ? 'Dólar' : k === 'EUR' ? 'Euro' : 'Libra'}</option>
+            <Field label="Cliente Inversionista">
+              <select className="input" value={form.client_id} onChange={e => fc('client_id', e.target.value)}>
+                <option value="">Seleccionar cliente aprobado...</option>
+                {clients.map(c => (
+                  <option key={c.id} value={c.id}>{c.first_name} {c.last_name} ({c.client_code})</option>
                 ))}
               </select>
             </Field>
-            <Field label={`Monto del depósito (${form.currency})`} required>
-              <input className="input" type="number" step="0.01" placeholder="0.00"
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Moneda">
+              <select className="input" value={form.currency} onChange={e => fc('currency', e.target.value)}>
+                {Object.entries(CURRENCIES).map(([k, v]) => (
+                  <option key={k} value={k}>{v.flag} {k}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Monto Capital">
+              <input className="input font-numeric" type="number" placeholder="0.00"
                 value={form.amount} onChange={e => fc('amount', e.target.value)} />
             </Field>
           </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Tasa mensual (%)" required>
-              <input className="input" type="number" step="0.1" placeholder="3.0"
-                value={form.rate_monthly} onChange={e => fc('rate_monthly', e.target.value)} />
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Tasa Mensual (%)">
+              <input className="input font-numeric" type="number" step="0.1"
+                value={form.rate_monthly} onChange={e => fc('rate_monthly', +e.target.value)} />
             </Field>
             <Field label="Plazo (meses)">
-              <input className="input" type="number" min="1" placeholder="12"
-                value={form.months} onChange={e => fc('months', e.target.value)} />
+              <input className="input font-numeric" type="number"
+                value={form.months} onChange={e => fc('months', +e.target.value)} />
             </Field>
           </div>
-
-          <Field label="Fecha de vencimiento (opcional)">
-            <input className="input" type="date"
-              value={form.maturity_date} onChange={e => fc('maturity_date', e.target.value)} />
-          </Field>
-
-          <Field label="Notas">
-            <textarea className="input h-16 resize-none" placeholder="Condiciones especiales, observaciones..."
+          <Field label="Notas u Observaciones (Opcional)">
+            <input className="input" type="text" placeholder="Detalles de la transferencia o depósito..."
               value={form.notes} onChange={e => fc('notes', e.target.value)} />
           </Field>
+          
+          <div className="p-3 bg-hpa-slate-1 rounded-lg text-xs space-y-1">
+            <p className="font-semibold text-hpa-slate-8">Resumen de Proyección:</p>
+            <p>Rendimiento mensual fijo: <strong className="text-hpa-700">{fmtC(formCalc.yieldTotal / (form.months || 1), form.currency)}</strong></p>
+            <p>Rendimiento total estimado: <strong className="text-emerald-600">{fmtC(formCalc.yieldTotal, form.currency)}</strong></p>
+            <p className="text-2xs text-hpa-slate-5 mt-1">* Incluye automáticamente 1 mes de gracia/desplazamiento operativo para la fecha de vencimiento.</p>
+          </div>
 
-          {isClient && (
-            <BankTransferInfo companyId={companyId} defaultCountry="DO" />
-          )}
-
-          {form.amount && form.rate_monthly && form.months && (
-            <div className="p-4 bg-hpa-slate-1 rounded-xl border border-hpa-slate-2">
-              <p className="text-xs font-bold text-hpa-slate-7 mb-3 uppercase tracking-wide">
-                Preview del rendimiento (interés simple)
-              </p>
-              <div className="grid grid-cols-3 gap-3 text-center text-xs">
-                <div>
-                  <p className="text-hpa-slate-5">Capital</p>
-                  <p className="font-bold text-hpa-slate-9 font-numeric">{fmtC(form.amount, form.currency)}</p>
-                </div>
-                <div>
-                  <p className="text-hpa-slate-5">Rendimiento ({form.months}m)</p>
-                  <p className="font-bold text-amber-600 font-numeric">{fmtC(formCalc.yieldTotal, form.currency)}</p>
-                </div>
-                <div>
-                  <p className="text-hpa-slate-5">Total final</p>
-                  <p className="font-bold text-emerald-600 font-numeric">{fmtC(formCalc.final, form.currency)}</p>
-                </div>
-              </div>
-              <div className="mt-2 pt-2 border-t border-hpa-slate-2 text-xs text-center text-hpa-slate-5">
-                Tier estimado: <strong className="text-hpa-700 uppercase">
-                  {parseFloat(form.amount) >= 200000 ? 'CORPORATE' :
-                   parseFloat(form.amount) >= 50000  ? 'PREMIUM' : 'STANDARD'}
-                </strong>
-                {form.currency !== 'BRL' && <span className="ml-2">(calculado en equivalente BRL)</span>}
-              </div>
-            </div>
-          )}
+          <div className="flex justify-end gap-3 pt-3 border-t">
+            <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancelar</button>
+            <button className="btn btn-primary" disabled={saving} onClick={saveInvestment}>
+              {saving ? 'Registrando...' : 'Guardar e Iniciar Depósito'}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>
