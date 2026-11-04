@@ -1,328 +1,237 @@
-import { useState, useEffect } from 'react'
-import { Plus, Edit2, CheckCircle, XCircle, Eye, DollarSign } from 'lucide-react'
-import { supabase, fmt, fmtDate } from '@/lib/supabase'
-import { StatusBadge, Modal, Field, Spinner, Empty, Tabs, Pagination } from '@/components/ui'
+import { useState, useEffect, useCallback } from 'react'
+import { Plus, Eye, Edit, Trash2, RefreshCw, X } from 'lucide-react'
+import { supabase, fmtDate } from '@/lib/supabase'
+import { StatusBadge, Modal, Field, Spinner, Empty } from '@/components/ui'
 import useAuthStore from '@/store/auth'
-
-const STATUS_COLORS = {
-  pending: 'badge-amber', approved: 'badge-blue', active: 'badge-green',
-  paused: 'badge-gray', expired: 'badge-gray', rejected: 'badge-red'
-}
-const STATUS_LABELS = {
-  pending: 'Pendiente', approved: 'Aprobado', active: 'Activo',
-  paused: 'Pausado', expired: 'Expirado', rejected: 'Rechazado'
-}
 
 export default function Advertising() {
   const { user } = useAuthStore()
-  const [tab, setTab] = useState('banners')
-  const [banners, setBanners] = useState([])
-  const [spaces, setSpaces] = useState([])
+  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+
+  const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
-  const [page, setPage] = useState(1)
-  const [pagination, setPagination] = useState({})
-  const [showModal, setShowModal] = useState(false)
-  const [showRequestModal, setShowRequestModal] = useState(false)
-  const [selected, setSelected] = useState(null)
-  const [form, setForm] = useState({})
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [selectedItem, setSelectedItem] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { loadSpaces(); loadBanners() }, [page])
+  // Estado del formulario de edición/alteración
+  const [form, setForm] = useState({
+    id: '',
+    advertiser_name: '',
+    agency_name: '',
+    space_name: '',
+    period: 'MENSUAL',
+    amount: '',
+    payment_status: 'PAGADO',
+    status: 'ACTIVO',
+    start_date: '',
+    end_date: ''
+  })
 
-  async function loadSpaces() {
-    const { data } = await supabase.from('ad_spaces').select('*').eq('is_active', true)
-    setSpaces(data || [])
-  }
-
-  async function loadBanners() {
+  const loadData = useCallback(async () => {
     setLoading(true)
-    const limit = 20
-    const offset = (page - 1) * limit
-    const { data, count } = await supabase
-      .from('ad_banners')
-      .select('*, ad_spaces(name, position)', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
-    setBanners(data || [])
-    setPagination({ total: count, page, limit, pages: Math.ceil((count||0)/limit) })
+    try {
+      const { data, error } = await supabase
+        .from('ad_spaces')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+
+      if (!error) setItems(data || [])
+    } catch (e) {
+      console.error(e)
+    }
     setLoading(false)
+  }, [companyId])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  // Abrir modal de edición
+  function handleEdit(item) {
+    setSelectedItem(item)
+    setForm({
+      id: item.id,
+      advertiser_name: item.advertiser_name || '',
+      agency_name: item.agency_name || '',
+      space_name: item.space_name || '',
+      period: item.period || 'MENSUAL',
+      amount: item.amount || '',
+      payment_status: item.payment_status || 'PAGADO',
+      status: item.status || 'ACTIVO',
+      start_date: item.start_date ? item.start_date.split('T')[0] : '',
+      end_date: item.end_date ? item.end_date.split('T')[0] : ''
+    })
+    setShowEditModal(true)
   }
 
-  function fc(k, v) { setForm(f => ({ ...f, [k]: v })) }
-
-  async function saveRequest() {
+  // Guardar cambios o actualización de plan
+  async function saveChanges() {
+    if (!form.amount) return alert('El monto es requerido')
     setSaving(true)
     try {
-      if (!form.advertiser_name || !form.advertiser_email || !form.space_id || !form.period_type) {
-        throw new Error('Completa: Nombre, Email, Espacio y Período')
-      }
-      const space = spaces.find(s => s.id === form.space_id)
-      const amount = form.period_type === 'weekly' ? space?.price_weekly : space?.price_monthly
-      const start = form.start_date || new Date().toISOString().split('T')[0]
-      const days = form.period_type === 'weekly' ? 7 : 30
-      const end = new Date(new Date(start).getTime() + days * 86400000).toISOString().split('T')[0]
+      const { error } = await supabase
+        .from('ad_spaces')
+        .update({
+          advertiser_name: form.advertiser_name,
+          agency_name: form.agency_name,
+          space_name: form.space_name,
+          period: form.period,
+          amount: parseFloat(form.amount),
+          payment_status: form.payment_status,
+          status: form.status,
+          start_date: form.start_date || null,
+          end_date: form.end_date || null
+        })
+        .eq('id', form.id)
 
-      await supabase.from('ad_banners').insert({
-        space_id: form.space_id,
-        advertiser_name: form.advertiser_name,
-        advertiser_email: form.advertiser_email,
-        advertiser_phone: form.advertiser_phone || null,
-        company_name: form.company_name || null,
-        image_url: form.image_url || null,
-        link_url: form.link_url || null,
-        alt_text: form.alt_text || null,
-        period_type: form.period_type,
-        start_date: start,
-        end_date: end,
-        payment_method: form.payment_method || 'transfer',
-        amount_paid: amount || 0,
-        notes: form.notes || null,
-        status: 'pending',
-        payment_status: 'pending'
-      })
-      setShowRequestModal(false)
-      setForm({})
-      loadBanners()
-      alert('✅ Solicitud enviada exitosamente. Te contactaremos para confirmar el pago.')
-    } catch (err) { alert(err.message) }
+      if (error) throw error
+      
+      alert('✅ Publicación alterada y actualizada correctamente.')
+      setShowEditModal(false)
+      loadData()
+    } catch (e) {
+      alert('❌ Error al actualizar: ' + e.message)
+    }
     setSaving(false)
   }
 
-  async function updateStatus(banner, newStatus) {
+  // Cancelar o eliminar publicación
+  async function handleDelete(id) {
+    if (!confirm('¿Estás seguro de cancelar/eliminar esta pauta publicitaria?')) return
     try {
-      const updates = { status: newStatus }
-      if (newStatus === 'approved') {
-        updates.approved_by = user.id
-        updates.approved_at = new Date().toISOString()
-      }
-      if (newStatus === 'active') {
-        updates.payment_status = 'paid'
-      }
-      await supabase.from('ad_banners').update(updates).eq('id', banner.id)
-      loadBanners()
-    } catch (err) { alert(err.message) }
-  }
+      const { error } = await supabase
+        .from('ad_spaces')
+        .update({ status: 'CANCELADO', payment_status: 'CANCELADO' })
+        .eq('id', id)
 
-  const TABS = [
-    { id: 'banners', label: 'Solicitudes y Banners' },
-    { id: 'spaces',  label: 'Espacios Disponibles' },
-  ]
-
-  const positionLabel = {
-    header: 'Header (Superior)', dashboard_top: 'Dashboard Principal',
-    footer: 'Pie de Página', sidebar: 'Lateral'
+      if (error) throw error
+      alert('✅ Pauta cancelada correctamente.')
+      loadData()
+    } catch (e) {
+      alert('❌ Error al cancelar: ' + e.message)
+    }
   }
 
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-hpa-slate-9">Publicidad</h2>
-          <p className="text-xs text-hpa-slate-5 mt-0.5">Gestión de espacios publicitarios</p>
-        </div>
-        <button className="btn btn-primary" onClick={() => { setForm({}); setShowRequestModal(true) }}>
-          <Plus size={15} /> Nueva Solicitud
-        </button>
+        <h2 className="text-xl font-bold text-hpa-slate-9">Publicidad</h2>
       </div>
 
-      <div className="card p-0">
-        <div className="px-5 pt-4">
-          <Tabs tabs={TABS} active={tab} onChange={setTab} />
+      <div className="card p-0 overflow-hidden">
+        <div className="table-wrapper">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>ANUNCIANTE</th>
+                <th>ESPACIO</th>
+                <th>PERÍODO</th>
+                <th>MONTO</th>
+                <th>PAGO</th>
+                <th>ESTADO</th>
+                <th>FECHAS</th>
+                <th className="text-right">ACCIONES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={8} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
+              ) : items.length === 0 ? (
+                <tr><td colSpan={8}><Empty title="Sin registros de publicidad" /></td></tr>
+              ) : items.map(item => (
+                <tr key={item.id}>
+                  <td>
+                    <p className="font-medium text-sm">{item.advertiser_name}</p>
+                    <p className="text-xs text-hpa-slate-5">{item.agency_name}</p>
+                  </td>
+                  <td>{item.space_name}</td>
+                  <td><span className="badge badge-blue">{item.period}</span></td>
+                  <td className="font-numeric font-semibold">RD${parseFloat(item.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                  <td><span className={`badge ${item.payment_status === 'PAGADO' ? 'badge-emerald' : 'badge-gold'}`}>{item.payment_status}</span></td>
+                  <td><StatusBadge status={item.status} /></td>
+                  <td className="text-xs text-hpa-slate-5">
+                    {item.start_date ? fmtDate(item.start_date) : '—'} — {item.end_date ? fmtDate(item.end_date) : '—'}
+                  </td>
+                  <td className="text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* Botón Alterar / Editar */}
+                      <button 
+                        className="p-1.5 hover:bg-slate-100 rounded text-slate-600 hover:text-hpa-700" 
+                        title="Alterar / Corregir datos"
+                        onClick={() => handleEdit(item)}
+                      >
+                        <Edit size={14} />
+                      </button>
+                      
+                      {/* Botón Cancelar / Eliminar */}
+                      <button 
+                        className="p-1.5 hover:bg-rose-50 rounded text-slate-400 hover:text-rose-600" 
+                        title="Cancelar publicación"
+                        onClick={() => handleDelete(item.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-
-        {tab === 'spaces' && (
-          <div className="p-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {spaces.map(s => (
-              <div key={s.id} className="border border-hpa-slate-2 rounded-xl p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <p className="font-semibold text-hpa-slate-9">{s.name}</p>
-                    <p className="text-xs text-hpa-slate-5">{positionLabel[s.position]} · {s.width}×{s.height}px</p>
-                  </div>
-                  <span className="badge badge-green">Disponible</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 bg-hpa-slate-1 rounded-lg text-center">
-                    <p className="text-xs text-hpa-slate-5">Semanal</p>
-                    <p className="font-bold text-hpa-700">{fmt(s.price_weekly)}</p>
-                  </div>
-                  <div className="p-3 bg-hpa-slate-1 rounded-lg text-center">
-                    <p className="text-xs text-hpa-slate-5">Mensual</p>
-                    <p className="font-bold text-hpa-700">{fmt(s.price_monthly)}</p>
-                  </div>
-                </div>
-                <button className="btn btn-primary w-full mt-3"
-                  onClick={() => { setForm({ space_id: s.id }); setShowRequestModal(true) }}>
-                  Solicitar este espacio
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {tab === 'banners' && (
-          <>
-            <div className="table-wrapper">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Anunciante</th><th>Espacio</th><th>Período</th>
-                    <th>Monto</th><th>Pago</th><th>Estado</th><th>Fechas</th><th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={8} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
-                  ) : banners.length === 0 ? (
-                    <tr><td colSpan={8}><Empty icon={DollarSign} title="Sin solicitudes" desc="No hay solicitudes de publicidad aún" /></td></tr>
-                  ) : banners.map(b => (
-                    <tr key={b.id}>
-                      <td>
-                        <p className="font-medium">{b.advertiser_name}</p>
-                        <p className="text-xs text-hpa-slate-5">{b.company_name || b.advertiser_email}</p>
-                      </td>
-                      <td className="text-xs">{b.ad_spaces?.name || '—'}</td>
-                      <td><span className="badge badge-blue">{b.period_type === 'weekly' ? 'Semanal' : 'Mensual'}</span></td>
-                      <td className="font-numeric">{fmt(b.amount_paid)}</td>
-                      <td>
-                        <span className={`badge ${b.payment_status === 'paid' ? 'badge-green' : 'badge-amber'}`}>
-                          {b.payment_status === 'paid' ? 'Pagado' : 'Pendiente'}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`badge ${STATUS_COLORS[b.status] || 'badge-gray'}`}>
-                          {STATUS_LABELS[b.status] || b.status}
-                        </span>
-                      </td>
-                      <td className="text-xs text-hpa-slate-5">
-                        {fmtDate(b.start_date)} — {fmtDate(b.end_date)}
-                      </td>
-                      <td>
-                        <div className="flex gap-1">
-                          {b.status === 'pending' && (
-                            <>
-                              <button className="btn btn-ghost btn-sm btn-icon text-emerald-600" title="Aprobar"
-                                onClick={() => updateStatus(b, 'approved')}>
-                                <CheckCircle size={13} />
-                              </button>
-                              <button className="btn btn-ghost btn-sm btn-icon text-red-500" title="Rechazar"
-                                onClick={() => updateStatus(b, 'rejected')}>
-                                <XCircle size={13} />
-                              </button>
-                            </>
-                          )}
-                          {b.status === 'approved' && (
-                            <button className="btn btn-ghost btn-sm btn-icon text-hpa-700" title="Activar (marcar pagado)"
-                              onClick={() => updateStatus(b, 'active')}>
-                              <DollarSign size={13} />
-                            </button>
-                          )}
-                          {b.image_url && (
-                            <a href={b.image_url} target="_blank" rel="noreferrer"
-                              className="btn btn-ghost btn-sm btn-icon">
-                              <Eye size={13} />
-                            </a>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination page={page} pages={pagination.pages} total={pagination.total} limit={20} onChange={setPage} />
-          </>
-        )}
       </div>
 
-      {/* Modal solicitud de banner */}
-      <Modal open={showRequestModal} onClose={() => { setShowRequestModal(false); setForm({}) }}
-        title="Solicitar Espacio Publicitario" size="lg"
-        footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => { setShowRequestModal(false); setForm({}) }}>Cancelar</button>
-            <button className="btn btn-primary" onClick={saveRequest} disabled={saving}>
-              {saving ? <Spinner size={14} /> : 'Enviar Solicitud'}
-            </button>
-          </>
-        }>
+      {/* Modal para Alterar o Actualizar Publicación */}
+      <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Alterar Publicación / Pauta">
         <div className="space-y-4">
-          <div>
-            <p className="form-section-title">Datos del Anunciante</p>
-            <div className="form-row">
-              <Field label="Nombre del Contacto" required>
-                <input className="input" value={form.advertiser_name||''} onChange={e=>fc('advertiser_name',e.target.value)} />
-              </Field>
-              <Field label="Empresa">
-                <input className="input" value={form.company_name||''} onChange={e=>fc('company_name',e.target.value)} />
-              </Field>
-            </div>
-            <div className="form-row mt-3">
-              <Field label="Email" required>
-                <input className="input" type="email" value={form.advertiser_email||''} onChange={e=>fc('advertiser_email',e.target.value)} />
-              </Field>
-              <Field label="Teléfono">
-                <input className="input" type="tel" value={form.advertiser_phone||''} onChange={e=>fc('advertiser_phone',e.target.value)} />
-              </Field>
-            </div>
-          </div>
-          <div>
-            <p className="form-section-title">Espacio y Período</p>
-            <div className="form-row">
-              <Field label="Espacio Publicitario" required>
-                <select className="select" value={form.space_id||''} onChange={e=>fc('space_id',e.target.value)}>
-                  <option value="">Seleccionar...</option>
-                  {spaces.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Período" required>
-                <select className="select" value={form.period_type||''} onChange={e=>fc('period_type',e.target.value)}>
-                  <option value="">Seleccionar...</option>
-                  <option value="weekly">Semanal</option>
-                  <option value="monthly">Mensual</option>
-                </select>
-              </Field>
-            </div>
-            {form.space_id && form.period_type && (
-              <div className="mt-2 p-3 bg-hpa-700/5 border border-hpa-700/20 rounded-lg">
-                <p className="text-xs text-hpa-slate-6">Precio del espacio seleccionado:</p>
-                <p className="text-lg font-bold text-hpa-700 font-numeric">
-                  {fmt(spaces.find(s=>s.id===form.space_id)?.[form.period_type==='weekly'?'price_weekly':'price_monthly'] || 0)}
-                </p>
-              </div>
-            )}
-            <Field label="Fecha de inicio" className="mt-3">
-              <input className="input" type="date" value={form.start_date||''} onChange={e=>fc('start_date',e.target.value)} />
-            </Field>
-          </div>
-          <div>
-            <p className="form-section-title">Contenido del Banner</p>
-            <Field label="URL de la imagen (link directo)">
-              <input className="input" type="url" placeholder="https://..." value={form.image_url||''} onChange={e=>fc('image_url',e.target.value)} />
-            </Field>
-            <Field label="URL de destino (al hacer clic)" className="mt-3">
-              <input className="input" type="url" placeholder="https://..." value={form.link_url||''} onChange={e=>fc('link_url',e.target.value)} />
-            </Field>
-            <Field label="Texto alternativo / descripción" className="mt-3">
-              <input className="input" value={form.alt_text||''} onChange={e=>fc('alt_text',e.target.value)} />
-            </Field>
-          </div>
-          <div>
-            <p className="form-section-title">Método de Pago</p>
-            <Field label="Cómo deseas pagar">
-              <select className="select" value={form.payment_method||''} onChange={e=>fc('payment_method',e.target.value)}>
-                <option value="">Seleccionar...</option>
-                <option value="transfer">Transferencia bancaria</option>
-                <option value="cash">Efectivo</option>
-                <option value="stripe">Stripe (tarjeta)</option>
-                <option value="paypal">PayPal</option>
+          <Field label="Anunciante">
+            <input className="input" value={form.advertiser_name} onChange={e => setForm({...form, advertiser_name: e.target.value})} />
+          </Field>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Espacio / Banner">
+              <select className="input" value={form.space_name} onChange={e => setForm({...form, space_name: e.target.value})}>
+                <option value="Banner Dashboard Principal">Banner Dashboard Principal</option>
+                <option value="Banner Superior - Header">Banner Superior - Header</option>
+                <option value="Banner Pie de Página">Banner Pie de Página</option>
+                <option value="Banner Lateral">Banner Lateral</option>
               </select>
             </Field>
-            <Field label="Notas adicionales" className="mt-3">
-              <textarea className="input h-16 resize-none" value={form.notes||''} onChange={e=>fc('notes',e.target.value)} />
+            <Field label="Período / Plan">
+              <select className="input" value={form.period} onChange={e => setForm({...form, period: e.target.value})}>
+                <option value="SEMANAL">SEMANAL</option>
+                <option value="MENSUAL">MENSUAL</option>
+                <option value="ANUAL">ANUAL</option>
+              </select>
             </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Monto (RD$)">
+              <input className="input font-numeric" type="number" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} />
+            </Field>
+            <Field label="Estado de Pago">
+              <select className="input" value={form.payment_status} onChange={e => setForm({...form, payment_status: e.target.value})}>
+                <option value="PENDIENTE">PENDIENTE</option>
+                <option value="PAGADO">PAGADO</option>
+                <option value="CANCELADO">CANCELADO</option>
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Fecha Inicio">
+              <input className="input" type="date" value={form.start_date} onChange={e => setForm({...form, start_date: e.target.value})} />
+            </Field>
+            <Field label="Fecha Fin">
+              <input className="input" type="date" value={form.end_date} onChange={e => setForm({...form, end_date: e.target.value})} />
+            </Field>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-3 border-t">
+            <button className="btn btn-ghost" onClick={() => setShowEditModal(false)}>Cancelar</button>
+            <button className="btn btn-primary" disabled={saving} onClick={saveChanges}>
+              {saving ? 'Guardando...' : 'Guardar Cambios'}
+            </button>
           </div>
         </div>
       </Modal>
