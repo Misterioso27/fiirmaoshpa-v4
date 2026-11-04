@@ -109,7 +109,7 @@ export default function Advertising() {
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-hpa-slate-9">Publicidad</h2>
+        <h2 className="text-xl font-bold text-hpa-slate-9">Publicidad y Anuncios</h2>
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -148,13 +148,15 @@ export default function Advertising() {
                   </td>
                   <td className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      {/* Botón Editar con Lápiz */}
                       <button 
                         className="p-1.5 hover:bg-slate-100 rounded text-slate-600 hover:text-hpa-700" 
-                        title="Alterar / Corregir datos"
+                        title="Alterar / Editar datos"
                         onClick={() => handleEdit(item)}
                       >
                         <Edit size={14} />
                       </button>
+                      {/* Botón Eliminar / Cancelar */}
                       <button 
                         className="p-1.5 hover:bg-rose-50 rounded text-slate-400 hover:text-rose-600" 
                         title="Cancelar publicación"
@@ -171,6 +173,7 @@ export default function Advertising() {
         </div>
       </div>
 
+      {/* Modal para Editar / Alterar */}
       <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Alterar Publicación / Pauta">
         <div className="space-y-4">
           <Field label="Anunciante">
