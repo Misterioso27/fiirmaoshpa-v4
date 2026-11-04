@@ -39,34 +39,34 @@ export default function Cash() {
   const { user } = useAuthStore()
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
 
-  const [registers, setRegisters]       = useState([])
+  const [registers, setRegisters]        = useState([])
   const [activeSession, setActiveSession] = useState(null)
-  const [movements, setMovements]       = useState([])
-  const [loading, setLoading]           = useState(true)
-  const [loadingMov, setLoadingMov]     = useState(false)
-  const [refreshing, setRefreshing]     = useState(false)
+  const [movements, setMovements]        = useState([])
+  const [loading, setLoading]            = useState(true)
+  const [loadingMov, setLoadingMov]      = useState(false)
+  const [refreshing, setRefreshing]      = useState(false)
 
   // Modal apertura
-  const [showOpen, setShowOpen]         = useState(false)
-  const [openForm, setOpenForm]         = useState({ opening_balance: '', notes: '' })
-  const [openSaving, setOpenSaving]     = useState(false)
+  const [showOpen, setShowOpen]          = useState(false)
+  const [openForm, setOpenForm]          = useState({ register_id: '', opening_balance: '', notes: '' })
+  const [openSaving, setOpenSaving]      = useState(false)
 
   // Modal cierre
-  const [showClose, setShowClose]       = useState(false)
-  const [closeForm, setCloseForm]       = useState({ closing_balance: '', notes: '' })
-  const [closeSaving, setCloseSaving]   = useState(false)
+  const [showClose, setShowClose]        = useState(false)
+  const [closeForm, setCloseForm]        = useState({ closing_balance: '', notes: '' })
+  const [closeSaving, setCloseSaving]    = useState(false)
 
   // Modal movimiento manual
   const [showMovement, setShowMovement] = useState(false)
-  const [movForm, setMovForm]           = useState({ type: 'income', category: 'other', amount: '', description: '', currency: 'DOP' })
-  const [movSaving, setMovSaving]       = useState(false)
+  const [movForm, setMovForm]            = useState({ type: 'income', category: 'other', amount: '', description: '', currency: 'DOP' })
+  const [movSaving, setMovSaving]        = useState(false)
 
   // ── Cargar cajas y sesión activa ─────────────────────────
   const load = useCallback(async () => {
     if (!companyId) return
     setLoading(true)
     try {
-      // 1. Obtener cajas de la empresa
+      // 1. Obtener cajas de la empresa (todas las monedas: DOP, BRL, USD)
       const { data: regs } = await supabase
         .from('cash_registers')
         .select('id, name, code, currency, status, current_balance, assigned_to')
@@ -321,8 +321,8 @@ export default function Cash() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-hpa-slate-9">Control de Caja y Flujo</h2>
-          <p className="text-xs text-hpa-slate-5 mt-0.5">Gestión diaria de disponibilidad de efectivo</p>
+          <h2 className="text-xl font-bold text-hpa-slate-9">Control de Caja y Flujo Multimoneda</h2>
+          <p className="text-xs text-hpa-slate-5 mt-0.5">Gestión diaria de disponibilidad de efectivo (DOP, BRL, USD)</p>
         </div>
         <div className="flex gap-2">
           <button className="btn btn-ghost btn-sm" onClick={refresh} disabled={refreshing}>
@@ -349,7 +349,7 @@ export default function Cash() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Sesión Abierta</p>
-                  <p className="text-xs text-hpa-slate-5 mt-0.5">{activeSession.cash_registers?.name}</p>
+                  <p className="text-xs text-hpa-slate-5 mt-0.5">{activeSession.cash_registers?.name} ({currency})</p>
                 </div>
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
               </div>
@@ -492,6 +492,7 @@ export default function Cash() {
         <div className="space-y-4">
           <Field label="Caja a abrir">
             <select className="select" value={openForm.register_id || ''} onChange={e => setOpenForm(f => ({ ...f, register_id: e.target.value }))}>
+              <option value="">-- Seleccione una caja --</option>
               {registers.filter(r => r.status === 'closed').map(r => (
                 <option key={r.id} value={r.id}>{r.name} · {r.code} · {r.currency}</option>
               ))}
@@ -584,7 +585,7 @@ export default function Cash() {
               </select>
             </Field>
             <Field label="Categoría">
-              <select className="select" value={movForm.category} onChange={e => setMovForm(f => ({ ...f, category: e.target.value }))}>
+              <select className="select" value={movForm.category} onChangee={e => setMovForm(f => ({ ...f, category: e.target.value }))}>
                 {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
                 ))}
