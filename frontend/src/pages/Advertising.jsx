@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Eye, Edit, Trash2, RefreshCw, X } from 'lucide-react'
+import { Plus, Eye, Edit, Trash2, X } from 'lucide-react'
 import { supabase, fmtDate } from '@/lib/supabase'
 import { StatusBadge, Modal, Field, Spinner, Empty } from '@/components/ui'
 import useAuthStore from '@/store/auth'
@@ -11,10 +11,8 @@ export default function Advertising() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [selectedItem, setSelectedItem] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  // Estado del formulario de edición/alteración
   const [form, setForm] = useState({
     id: '',
     advertiser_name: '',
@@ -46,9 +44,7 @@ export default function Advertising() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Abrir modal de edición
   function handleEdit(item) {
-    setSelectedItem(item)
     setForm({
       id: item.id,
       advertiser_name: item.advertiser_name || '',
@@ -64,7 +60,6 @@ export default function Advertising() {
     setShowEditModal(true)
   }
 
-  // Guardar cambios o actualización de plan
   async function saveChanges() {
     if (!form.amount) return alert('El monto es requerido')
     setSaving(true)
@@ -95,9 +90,8 @@ export default function Advertising() {
     setSaving(false)
   }
 
-  // Cancelar o eliminar publicación
   async function handleDelete(id) {
-    if (!confirm('¿Estás seguro de cancelar/eliminar esta pauta publicitaria?')) return
+    if (!confirm('¿Estás seguro de cancelar esta pauta publicitaria?')) return
     try {
       const { error } = await supabase
         .from('ad_spaces')
@@ -154,7 +148,6 @@ export default function Advertising() {
                   </td>
                   <td className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      {/* Botón Alterar / Editar */}
                       <button 
                         className="p-1.5 hover:bg-slate-100 rounded text-slate-600 hover:text-hpa-700" 
                         title="Alterar / Corregir datos"
@@ -162,8 +155,6 @@ export default function Advertising() {
                       >
                         <Edit size={14} />
                       </button>
-                      
-                      {/* Botón Cancelar / Eliminar */}
                       <button 
                         className="p-1.5 hover:bg-rose-50 rounded text-slate-400 hover:text-rose-600" 
                         title="Cancelar publicación"
@@ -180,7 +171,6 @@ export default function Advertising() {
         </div>
       </div>
 
-      {/* Modal para Alterar o Actualizar Publicación */}
       <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Alterar Publicación / Pauta">
         <div className="space-y-4">
           <Field label="Anunciante">
