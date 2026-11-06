@@ -6,6 +6,7 @@ export default function Advertising() {
   const [ads, setAds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingAd, setEditingAd] = useState(null);
 
   const [formData, setFormData] = useState({
     advertiser: '',
@@ -13,7 +14,9 @@ export default function Advertising() {
     period: 'Mensual',
     amount: '5000',
     currency: 'DOP',
-    status: 'Pendiente de Pago'
+    status: 'Pendiente de Pago',
+    start_date: new Date().toISOString().split('T')[0],
+    end_date: new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0]
   });
 
   useEffect(() => {
@@ -36,50 +39,95 @@ export default function Advertising() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      // 1. Guardar la solicitud publicitaria
-      const { data: adData, error: adError } = await supabase.from('advertising').insert([formData]).select();
-      if (adError) throw adError;
+      if (editingAd) {
+        // Actualizar anuncio existente
+        const { error } = await supabase
+          .from('advertising')
+          .update(formData)
+          .eq('id', editingAd.id);
+        if (error) throw error;
+        alert('Anuncio actualizado correctamente.');
+      } else {
+        // Crear nuevo anuncio
+        const { error } = await supabase.from('advertising').insert([formData]);
+        if (error) throw error;
 
-      // 2. Si el estado es Pagado, registrar automáticamente el ingreso en Caja y Flujo
-      if (formData.status === 'Pagado') {
-        const { error: cashError } = await supabase.from('cash_transactions').insert([{
-          concept: `Pago de Publicidad - ${formData.advertiser} (${formData.space})`,
-          type: 'Ingreso',
-          amount: parseFloat(formData.amount),
-          currency: formData.currency,
-          reference: 'Publicidad Anunciante',
-          notes: `Período: ${formData.period}`
-        }]);
-        if (cashError) console.error('Error al registrar en caja:', cashError);
+        // Si se crea directamente como Pagado, registrar en Caja
+        if (formData.status === 'Pagado' || formData.status === 'Activo') {
+          await supabase.from('cash_transactions').insert([{
+            concept: `Pago de Publicidad - ${formData.advertiser} (${formData.space})`,
+            type: 'Ingreso',
+            amount: parseFloat(formData.amount),
+            currency: formData.currency,
+            reference: 'Publicidad Anunciante',
+            notes: `Período: ${formData.period}`
+          }]);
+        }
       }
 
       setIsModalOpen(false);
+      setEditingAd(null);
       fetchAds();
-      setFormData({
-        advertiser: '',
-        space: 'Banner Dashboard Principal',
-        period: 'Mensual',
-        amount: '5000',
-        currency: 'DOP',
-        status: 'Pendiente de Pago'
-      });
+      resetForm();
     } catch (err) {
       console.error('Error saving ad:', err);
       alert('Error al guardar la solicitud publicitaria');
     }
   };
 
-  // Función para aprobar/pagar un anuncio existente y enviarlo a Caja
+  const resetForm = () => {
+    setFormData({
+      advertiser: '',
+      space: 'Banner Dashboard Principal',
+      period: 'Mensual',
+      amount: '5000',
+      currency: 'DOP',
+      status: 'Pendiente de Pago',
+      start_date: new Date().toISOString().split('T')[0],
+      end_date: new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0]
+    });
+  };
+
+  const handleEdit = (ad) => {
+    setEditingAd(ad);
+    setFormData({
+      advertiser: ad.advertiser || '',
+      space: ad.space || 'Banner Dashboard Principal',
+      period: ad.period || 'Mensual',
+      amount: ad.amount || '5000',
+      currency: ad.currency || 'DOP',
+      status: ad.status || 'Pendiente de Pago',
+      start_date: ad.start_date || new Date().toISOString().split('T')[0],
+      end_date: ad.end_date || new Date().toISOString().split('T')[0]
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleRenew = (ad) => {
+    // Duplica o renueva la cuenta para una nueva publicación
+    setEditingAd(null);
+    setFormData({
+      advertiser: ad.advertiser + ' (Renovación/Extensión)',
+      space: ad.space,
+      period: ad.period,
+      amount: ad.amount,
+      currency: ad.currency || 'DOP',
+      status: 'Pendiente de Pago',
+      start_date: new Date().toISOString().split('T')[0],
+      end_date: new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0]
+    });
+    setIsModalOpen(true);
+  };
+
   const handleMarkAsPaid = async (ad) => {
     try {
       const { error: updateError } = await supabase
         .from('advertising')
-        .update({ status: 'Pagado' })
+        .update({ status: 'Activo' })
         .eq('id', ad.id);
 
       if (updateError) throw updateError;
 
-      // Registrar el ingreso en la caja
       const { error: cashError } = await supabase.from('cash_transactions').insert([{
         concept: `Pago de Publicidad - ${ad.advertiser} (${ad.space})`,
         type: 'Ingreso',
@@ -91,7 +139,7 @@ export default function Advertising() {
 
       if (cashError) throw cashError;
 
-      alert('¡Anuncio validado y pago registrado en Caja con éxito!');
+      alert('¡Anuncio validado, marcado como Activo y registrado en Caja!');
       fetchAds();
     } catch (err) {
       console.error('Error al procesar pago:', err);
@@ -99,16 +147,35 @@ export default function Advertising() {
     }
   };
 
+  // Encontrar el banner activo más reciente para mostrar en el encabezado
+  const activeBanner = ads.find(ad => ad.status === 'Activo' || ad.status === 'Pagado');
+
   return (
     <div className="p-6 bg-zinc-950 min-h-screen text-white">
+      {/* BANNER ACTIVO EN EL ENCABEZADO */}
+      {activeBanner && (
+        <div className="mb-6 p-4 bg-gradient-to-r from-amber-600/20 via-amber-500/10 to-zinc-900 border border-amber-500/30 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4 shadow-lg">
+          <div className="flex items-center gap-3">
+            <span className="px-2.5 py-1 text-xs font-bold bg-amber-500 text-black rounded-lg uppercase tracking-wider">Banner Activo</span>
+            <div>
+              <h3 className="font-bold text-white text-base">{activeBanner.advertiser}</h3>
+              <p className="text-xs text-zinc-300">{activeBanner.space} — <span className="text-amber-400 font-semibold">{activeBanner.period}</span></p>
+            </div>
+          </div>
+          <div className="text-xs text-zinc-400 bg-zinc-950/60 px-3 py-1.5 rounded-xl border border-zinc-800">
+            Vigente hasta: <span className="text-white font-medium">{activeBanner.end_date || 'Activo'}</span>
+          </div>
+        </div>
+      )}
+
       {/* Encabezado Principal */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-wide">Publicidad y Anuncios</h1>
-          <p className="text-sm text-zinc-400">Gestión de espacios publicitarios, validación de pagos y tarifas por categoría</p>
+          <p className="text-sm text-zinc-400">Gestión de espacios, validación de pagos, renovaciones y tarifas</p>
         </div>
         <button 
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => { setEditingAd(null); resetForm(); setIsModalOpen(true); }}
           className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-xl shadow-lg transition duration-200 flex items-center gap-2"
         >
           <span>+ Nueva Solicitud</span>
@@ -123,7 +190,7 @@ export default function Advertising() {
             activeTab === 'solicitudes' ? 'border-amber-500 text-amber-400' : 'border-transparent text-zinc-400 hover:text-white'
           }`}
         >
-          Solicitudes y Banners Activos
+          Solicitudes y Banners
         </button>
         <button
           onClick={() => setActiveTab('espacios')}
@@ -144,10 +211,10 @@ export default function Advertising() {
                 <tr className="border-b border-zinc-800 text-xs uppercase tracking-wider text-zinc-400 bg-zinc-950/50">
                   <th className="p-4">Anunciante</th>
                   <th className="p-4">Espacio</th>
-                  <th className="p-4">Período</th>
+                  <th className="p-4">Período / Fechas</th>
                   <th className="p-4">Monto</th>
                   <th className="p-4">Estado</th>
-                  <th className="p-4">Acciones / Validación Caja</th>
+                  <th className="p-4 text-center">Acciones y Gestión</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60 text-sm">
@@ -164,30 +231,47 @@ export default function Advertising() {
                     <tr key={idx} className="hover:bg-zinc-800/40 transition">
                       <td className="p-4 font-medium text-white">{ad.advertiser}</td>
                       <td className="p-4 text-zinc-300">{ad.space}</td>
-                      <td className="p-4">
-                        <span className="px-2.5 py-1 text-xs font-semibold bg-sky-500/10 text-sky-400 rounded-full border border-sky-500/20">
-                          {ad.period}
-                        </span>
+                      <td className="p-4 text-xs text-zinc-300">
+                        <span className="font-semibold text-amber-400">{ad.period}</span>
+                        <div className="text-zinc-500">{ad.start_date} al {ad.end_date}</div>
                       </td>
                       <td className="p-4 font-bold text-amber-400">{ad.currency || 'DOP'} ${ad.amount}</td>
                       <td className="p-4">
                         <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
-                          ad.status === 'Pagado' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          ad.status === 'Activo' || ad.status === 'Pagado' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                         }`}>
                           {ad.status}
                         </span>
                       </td>
                       <td className="p-4">
-                        {ad.status !== 'Pagado' ? (
+                        <div className="flex items-center justify-center gap-2">
+                          {/* Validar pago si está pendiente */}
+                          {ad.status !== 'Activo' && ad.status !== 'Pagado' && (
+                            <button 
+                              onClick={() => handleMarkAsPaid(ad)}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg text-xs transition"
+                              title="Validar y enviar a Caja"
+                            >
+                              Validar Pago
+                            </button>
+                          )}
+                          {/* Botón Lápiz para Editar */}
                           <button 
-                            onClick={() => handleMarkAsPaid(ad)}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg text-xs transition shadow"
+                            onClick={() => handleEdit(ad)}
+                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg transition"
+                            title="Editar datos"
                           >
-                            Validar Pago y Enviar a Caja
+                            ✏️
                           </button>
-                        ) : (
-                          <span className="text-xs text-emerald-400 font-medium">Registrado en Caja ✓</span>
-                        )}
+                          {/* Botón Renovar / Nueva Publicación */}
+                          <button 
+                            onClick={() => handleRenew(ad)}
+                            className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-lg transition text-xs font-medium px-2"
+                            title="Renovar o agregar publicación"
+                          >
+                            Renovar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -220,11 +304,13 @@ export default function Advertising() {
         </div>
       )}
 
-      {/* Modal de Nueva Solicitud */}
+      {/* Modal de Solicitud / Edición / Renovación */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
-            <h3 className="text-xl font-bold text-white mb-4">Nueva Solicitud Publicitaria</h3>
+            <h3 className="text-xl font-bold text-white mb-4">
+              {editingAd ? 'Editar Registro Publicitario' : 'Nueva Solicitud / Renovación'}
+            </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-zinc-400 mb-1">Nombre del Anunciante</label>
@@ -234,7 +320,7 @@ export default function Advertising() {
                   value={formData.advertiser}
                   onChange={(e) => setFormData({...formData, advertiser: e.target.value})}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-amber-500"
-                  placeholder="Ej. Agencia de viajes AirStay RD"
+                  placeholder="Ej. AirStay RD"
                 />
               </div>
               <div>
@@ -269,7 +355,7 @@ export default function Advertising() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Monto (DOP)</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Monto</label>
                   <input 
                     type="number" 
                     value={formData.amount}
@@ -292,14 +378,15 @@ export default function Advertising() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Estado Inicial</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Estado</label>
                   <select 
                     value={formData.status}
                     onChange={(e) => setFormData({...formData, status: e.target.value})}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-amber-500"
                   >
                     <option>Pendiente de Pago</option>
-                    <option>Pagado</option>
+                    <option>Activo</option>
+                    <option>Expirado</option>
                   </select>
                 </div>
               </div>
@@ -315,7 +402,7 @@ export default function Advertising() {
                   type="submit" 
                   className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-xl text-sm transition"
                 >
-                  Guardar Solicitud
+                  {editingAd ? 'Guardar Cambios' : 'Registrar Anuncio'}
                 </button>
               </div>
             </form>
