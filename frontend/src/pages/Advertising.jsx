@@ -1,233 +1,225 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, Eye, Edit, Trash2, X } from 'lucide-react'
-import { supabase, fmtDate } from '@/lib/supabase'
-import { StatusBadge, Modal, Field, Spinner, Empty } from '@/components/ui'
-import useAuthStore from '@/store/auth'
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 export default function Advertising() {
-  const { user } = useAuthStore()
-  const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
+  const [ads, setAds] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  const [formData, setFormData] = useState({
+    advertiser: '',
+    space: 'Banner Principal (Top)',
+    period: '1 Mes',
+    amount: '5000',
+    currency: 'DOP',
+    status: 'Pendiente'
+  });
 
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showEditModal, setShowEditModal] = useState(false)
-  const [saving, setSaving] = useState(false)
+  useEffect(() => {
+    fetchAds();
+  }, []);
 
-  const [form, setForm] = useState({
-    id: '',
-    advertiser_name: '',
-    agency_name: '',
-    space_name: '',
-    period: 'MENSUAL',
-    amount: '',
-    payment_status: 'PAGADO',
-    status: 'ACTIVO',
-    start_date: '',
-    end_date: ''
-  })
-
-  const loadData = useCallback(async () => {
-    setLoading(true)
+  const fetchAds = async () => {
     try {
-      const { data, error } = await supabase
-        .from('ad_spaces')
-        .select('*')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false })
-
-      if (!error) setItems(data || [])
-    } catch (e) {
-      console.error(e)
+      setLoading(true);
+      const { data, error } = await supabase.from('advertising').select('*');
+      if (error) throw error;
+      setAds(data || []);
+    } catch (err) {
+      console.error('Error fetching ads:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false)
-  }, [companyId])
+  };
 
-  useEffect(() => { loadData() }, [loadData])
-
-  function handleEdit(item) {
-    setForm({
-      id: item.id,
-      advertiser_name: item.advertiser_name || '',
-      agency_name: item.agency_name || '',
-      space_name: item.space_name || '',
-      period: item.period || 'MENSUAL',
-      amount: item.amount || '',
-      payment_status: item.payment_status || 'PAGADO',
-      status: item.status || 'ACTIVO',
-      start_date: item.start_date ? item.start_date.split('T')[0] : '',
-      end_date: item.end_date ? item.end_date.split('T')[0] : ''
-    })
-    setShowEditModal(true)
-  }
-
-  async function saveChanges() {
-    if (!form.amount) return alert('El monto es requerido')
-    setSaving(true)
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     try {
-      const { error } = await supabase
-        .from('ad_spaces')
-        .update({
-          advertiser_name: form.advertiser_name,
-          agency_name: form.agency_name,
-          space_name: form.space_name,
-          period: form.period,
-          amount: parseFloat(form.amount),
-          payment_status: form.payment_status,
-          status: form.status,
-          start_date: form.start_date || null,
-          end_date: form.end_date || null
-        })
-        .eq('id', form.id)
-
-      if (error) throw error
-      
-      alert('✅ Publicación alterada y actualizada correctamente.')
-      setShowEditModal(false)
-      loadData()
-    } catch (e) {
-      alert('❌ Error al actualizar: ' + e.message)
+      const { error } = await supabase.from('advertising').insert([formData]);
+      if (error) throw error;
+      setIsModalOpen(false);
+      fetchAds();
+      setFormData({
+        advertiser: '',
+        space: 'Banner Principal (Top)',
+        period: '1 Mes',
+        amount: '5000',
+        currency: 'DOP',
+        status: 'Pendiente'
+      });
+    } catch (err) {
+      console.error('Error saving ad:', err);
+      alert('Error al guardar la solicitud');
     }
-    setSaving(false)
-  }
-
-  async function handleDelete(id) {
-    if (!confirm('¿Estás seguro de cancelar esta pauta publicitaria?')) return
-    try {
-      const { error } = await supabase
-        .from('ad_spaces')
-        .update({ status: 'CANCELADO', payment_status: 'CANCELADO' })
-        .eq('id', id)
-
-      if (error) throw error
-      alert('✅ Pauta cancelada correctamente.')
-      loadData()
-    } catch (e) {
-      alert('❌ Error al cancelar: ' + e.message)
-    }
-  }
+  };
 
   return (
-    <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-hpa-slate-9">Publicidad y Anuncios</h2>
+    <div className="p-6 bg-zinc-950 min-h-screen text-white">
+      {/* Encabezado y Botón de Solicitud */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-wide">Publicidad y Anuncios</h1>
+          <p className="text-sm text-zinc-400">Gestión de campañas, tarifas por categoría y solicitudes de anunciantes</p>
+        </div>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-xl shadow-lg transition duration-200 flex items-center gap-2"
+        >
+          <span>+ Solicitar Publicidad</span>
+        </button>
       </div>
 
-      <div className="card p-0 overflow-hidden">
-        <div className="table-wrapper">
-          <table className="table">
+      {/* Tarjetas de Tarifas por Categoría */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="p-5 bg-zinc-900/90 border border-zinc-800 rounded-2xl shadow-md">
+          <span className="text-xs font-semibold px-2.5 py-1 bg-amber-500/10 text-amber-400 rounded-full">Destacado</span>
+          <h3 className="font-bold text-lg text-white mt-3">Banner Principal (Top)</h3>
+          <p className="text-3xl font-extrabold text-amber-400 mt-2">DOP $5,000 <span className="text-xs font-normal text-zinc-400">/ mes</span></p>
+          <p className="text-xs text-zinc-400 mt-2">Máxima visibilidad en la cabecera de la aplicación y portal principal.</p>
+        </div>
+        <div className="p-5 bg-zinc-900/90 border border-zinc-800 rounded-2xl shadow-md">
+          <span className="text-xs font-semibold px-2.5 py-1 bg-amber-500/10 text-amber-400 rounded-full">Estándar</span>
+          <h3 className="font-bold text-lg text-white mt-3">Sidebar Lateral</h3>
+          <p className="text-3xl font-extrabold text-amber-400 mt-2">DOP $3,000 <span className="text-xs font-normal text-zinc-400">/ mes</span></p>
+          <p className="text-xs text-zinc-400 mt-2">Ubicado en los paneles laterales de navegación y reportes secundarios.</p>
+        </div>
+        <div className="p-5 bg-zinc-900/90 border border-zinc-800 rounded-2xl shadow-md">
+          <span className="text-xs font-semibold px-2.5 py-1 bg-amber-500/10 text-amber-400 rounded-full">Premium</span>
+          <h3 className="font-bold text-lg text-white mt-3">Notificación Popup</h3>
+          <p className="text-3xl font-extrabold text-amber-400 mt-2">DOP $8,000 <span className="text-xs font-normal text-zinc-400">/ mes</span></p>
+          <p className="text-xs text-zinc-400 mt-2">Impacto directo al iniciar sesión con alerta emergente personalizada.</p>
+        </div>
+      </div>
+
+      {/* Tabla de Registros */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
+        <div className="p-5 border-b border-zinc-800 flex justify-between items-center">
+          <h2 className="font-bold text-lg text-white">Listado de Campañas y Solicitudes</h2>
+          <span className="text-xs text-zinc-400">{ads.length} registros totales</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr>
-                <th>ANUNCIANTE</th>
-                <th>ESPACIO</th>
-                <th>PERÍODO</th>
-                <th>MONTO</th>
-                <th>PAGO</th>
-                <th>ESTADO</th>
-                <th>FECHAS</th>
-                <th className="text-right">ACCIONES</th>
+              <tr className="border-b border-zinc-800 text-xs uppercase tracking-wider text-zinc-400 bg-zinc-950/50">
+                <th className="p-4">Anunciante</th>
+                <th className="p-4">Espacio</th>
+                <th className="p-4">Período</th>
+                <th className="p-4">Monto</th>
+                <th className="p-4">Estado</th>
+                <th className="p-4">Acciones</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-zinc-800/60 text-sm">
               {loading ? (
-                <tr><td colSpan={8} className="py-12 text-center"><Spinner size={20} className="mx-auto" /></td></tr>
-              ) : items.length === 0 ? (
-                <tr><td colSpan={8}><Empty title="Sin registros de publicidad" /></td></tr>
-              ) : items.map(item => (
-                <tr key={item.id}>
-                  <td>
-                    <p className="font-medium text-sm">{item.advertiser_name}</p>
-                    <p className="text-xs text-hpa-slate-5">{item.agency_name}</p>
-                  </td>
-                  <td>{item.space_name}</td>
-                  <td><span className="badge badge-blue">{item.period}</span></td>
-                  <td className="font-numeric font-semibold">RD${parseFloat(item.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                  <td><span className={`badge ${item.payment_status === 'PAGADO' ? 'badge-emerald' : 'badge-gold'}`}>{item.payment_status}</span></td>
-                  <td><StatusBadge status={item.status} /></td>
-                  <td className="text-xs text-hpa-slate-5">
-                    {item.start_date ? fmtDate(item.start_date) : '—'} — {item.end_date ? fmtDate(item.end_date) : '—'}
-                  </td>
-                  <td className="text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {/* Botón Editar con Lápiz */}
-                      <button 
-                        className="p-1.5 hover:bg-slate-100 rounded text-slate-600 hover:text-hpa-700" 
-                        title="Alterar / Editar datos"
-                        onClick={() => handleEdit(item)}
-                      >
-                        <Edit size={14} />
-                      </button>
-                      {/* Botón Eliminar / Cancelar */}
-                      <button 
-                        className="p-1.5 hover:bg-rose-50 rounded text-slate-400 hover:text-rose-600" 
-                        title="Cancelar publicación"
-                        onClick={() => handleDelete(item.id)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
+                <tr>
+                  <td colSpan="6" className="p-8 text-center text-zinc-500">Cargando registros...</td>
                 </tr>
-              ))}
+              ) : ads.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="p-12 text-center text-zinc-500">Sin registros de publicidad activos</td>
+                </tr>
+              ) : (
+                ads.map((ad, idx) => (
+                  <tr key={idx} className="hover:bg-zinc-800/40 transition">
+                    <td className="p-4 font-medium text-white">{ad.advertiser}</td>
+                    <td className="p-4 text-zinc-300">{ad.space}</td>
+                    <td className="p-4 text-zinc-300">{ad.period}</td>
+                    <td className="p-4 font-bold text-amber-400">{ad.currency} ${ad.amount}</td>
+                    <td className="p-4">
+                      <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
+                        ad.status === 'Aprobada' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                      }`}>
+                        {ad.status}
+                      </span>
+                    </td>
+                    <td className="p-4 text-zinc-400">
+                      <button className="text-zinc-400 hover:text-white transition">Gestionar</button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Modal para Editar / Alterar */}
-      <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Alterar Publicación / Pauta">
-        <div className="space-y-4">
-          <Field label="Anunciante">
-            <input className="input" value={form.advertiser_name} onChange={e => setForm({...form, advertiser_name: e.target.value})} />
-          </Field>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Espacio / Banner">
-              <select className="input" value={form.space_name} onChange={e => setForm({...form, space_name: e.target.value})}>
-                <option value="Banner Dashboard Principal">Banner Dashboard Principal</option>
-                <option value="Banner Superior - Header">Banner Superior - Header</option>
-                <option value="Banner Pie de Página">Banner Pie de Página</option>
-                <option value="Banner Lateral">Banner Lateral</option>
-              </select>
-            </Field>
-            <Field label="Período / Plan">
-              <select className="input" value={form.period} onChange={e => setForm({...form, period: e.target.value})}>
-                <option value="SEMANAL">SEMANAL</option>
-                <option value="MENSUAL">MENSUAL</option>
-                <option value="ANUAL">ANUAL</option>
-              </select>
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Monto (RD$)">
-              <input className="input font-numeric" type="number" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} />
-            </Field>
-            <Field label="Estado de Pago">
-              <select className="input" value={form.payment_status} onChange={e => setForm({...form, payment_status: e.target.value})}>
-                <option value="PENDIENTE">PENDIENTE</option>
-                <option value="PAGADO">PAGADO</option>
-                <option value="CANCELADO">CANCELADO</option>
-              </select>
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Fecha Inicio">
-              <input className="input" type="date" value={form.start_date} onChange={e => setForm({...form, start_date: e.target.value})} />
-            </Field>
-            <Field label="Fecha Fin">
-              <input className="input" type="date" value={form.end_date} onChange={e => setForm({...form, end_date: e.target.value})} />
-            </Field>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-3 border-t">
-            <button className="btn btn-ghost" onClick={() => setShowEditModal(false)}>Cancelar</button>
-            <button className="btn btn-primary" disabled={saving} onClick={saveChanges}>
-              {saving ? 'Guardando...' : 'Guardar Cambios'}
-            </button>
+      {/* Modal de Solicitud */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-4">Solicitar Nuevo Espacio Publicitario</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Nombre del Anunciante / Empresa</label>
+                <input 
+                  type="text" 
+                  required
+                  value={formData.advertiser}
+                  onChange={(e) => setFormData({...formData, advertiser: e.target.value})}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-amber-500"
+                  placeholder="Ej. Inversiones HPA"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Espacio Publicitario</label>
+                <select 
+                  value={formData.space}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    let amt = '5000';
+                    if(val.includes('Sidebar')) amt = '3000';
+                    if(val.includes('Popup')) amt = '8000';
+                    setFormData({...formData, space: val, amount: amt});
+                  }}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-amber-500"
+                >
+                  <option>Banner Principal (Top) - DOP $5,000</option>
+                  <option>Sidebar Lateral - DOP $3,000</option>
+                  <option>Notificación Popup - DOP $8,000</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Período</label>
+                  <select 
+                    value={formData.period}
+                    onChange={(e) => setFormData({...formData, period: e.target.value})}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-amber-500"
+                  >
+                    <option>1 Mes</option>
+                    <option>3 Meses</option>
+                    <option>6 Meses</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Monto (DOP)</label>
+                  <input 
+                    type="number" 
+                    value={formData.amount}
+                    onChange={(e) => setFormData({...formData, amount: e.target.value})}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button 
+                  type="button" 
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-sm transition"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-xl text-sm transition"
+                >
+                  Guardar Solicitud
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </Modal>
+      )}
     </div>
-  )
+  );
 }
