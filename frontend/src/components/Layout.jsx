@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, TrendingUp, CreditCard,
   PhoneCall, Landmark, Briefcase, Bot, BarChart3,
   Shield, Settings, LogOut, Bell, ChevronDown,
-  Menu, X, User, Building2, LayoutList, Upload as UploadIcon, Megaphone
+  Menu, X, User, LayoutList, Upload as UploadIcon, Megaphone
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import useAuthStore from '@/store/auth'
@@ -28,6 +28,174 @@ const NAV = [
   { to: '/audit',       icon: Shield,          label: 'Auditoría',      module: 'audit',       staffOnly: true },
   { to: '/settings',    icon: Settings,        label: 'Configuración',  module: 'settings',    staffOnly: true },
 ]
+
+function NotificationDropdown() {
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(false)
+  const ref = useRef(null)
+  const navigate = useNavigate()
+
+  async function loadAlerts() {
+    setLoading(true)
+    const list = []
+    try {
+      const [
+        { data: pendingAds },
+        { data: pendingLoans },
+        { data: pendingApprovals },
+        { data: overdueLoans },
+      ] = await Promise.all([
+        supabase
+          .from('ad_banners')
+          .select('id, advertiser_name, company_name, status')
+          .in('status', ['pending', 'Pendiente'])
+          .limit(5),
+        supabase
+          .from('loan_applications')
+          .select('id, status')
+          .in('status', ['pending', 'submitted', 'Pendiente'])
+          .limit(5),
+        supabase
+          .from('approval_requests')
+          .select('id, status')
+          .in('status', ['pending', 'Pendiente'])
+          .limit(5),
+        supabase
+          .from('loans')
+          .select('id, status')
+          .in('status', ['overdue', 'defaulted', 'mora', 'En mora'])
+          .limit(5),
+      ])
+
+      ;(pendingAds || []).forEach(a => list.push({
+        id: `ad-${a.id}`,
+        badge: 'Publicidad',
+        label: `Solicitud: ${a.company_name || a.advertiser_name}`,
+        to: '/advertising',
+      }))
+
+      ;(pendingLoans || []).forEach(l => list.push({
+        id: `loan-${l.id}`,
+        badge: 'Préstamo',
+        label: 'Solicitud de préstamo pendiente',
+        to: '/loans',
+      }))
+
+      ;(pendingApprovals || []).forEach(ap => list.push({
+        id: `ap-${ap.id}`,
+        badge: 'Aprobación',
+        label: 'Solicitud pendiente de aprobación',
+        to: '/investments',
+      }))
+
+      ;(overdueLoans || []).forEach(ov => list.push({
+        id: `ov-${ov.id}`,
+        badge: 'Cobranza',
+        label: 'Préstamo en mora requiere atención',
+        to: '/collections',
+      }))
+    } catch (err) {
+      console.error('Error cargando alertas:', err)
+    }
+    setItems(list)
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    loadAlerts()
+    function handleOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => {
+          const next = !open
+          setOpen(next)
+          if (next) loadAlerts()
+        }}
+        className="relative p-2 rounded-lg transition-colors cursor-pointer"
+        style={{ color: 'rgba(255,255,255,0.65)' }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--dark-700)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        aria-label="Notificaciones"
+      >
+        <Bell size={17} />
+        {items.length > 0 && (
+          <span
+            className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full border-2"
+            style={{ background: '#EF4444', borderColor: 'var(--dark-900)' }}
+          />
+        )}
+      </button>
+
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-2 rounded-xl shadow-2xl z-50 overflow-hidden border"
+          style={{ background: 'var(--dark-800)', borderColor: 'var(--dark-border)', width: '19rem' }}
+        >
+          <div
+            className="px-4 py-2.5 flex items-center justify-between"
+            style={{ background: 'var(--dark-900)', borderBottom: '1px solid var(--dark-border)' }}
+          >
+            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--gold-primary)' }}>
+              Notificaciones ({items.length})
+            </span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-xs cursor-pointer"
+              style={{ color: 'rgba(255,255,255,0.45)' }}
+            >
+              Cerrar
+            </button>
+          </div>
+
+          <div className="p-2 max-h-72 overflow-y-auto space-y-1">
+            {loading ? (
+              <p className="text-xs text-center py-4" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                Consultando...
+              </p>
+            ) : items.length === 0 ? (
+              <p className="text-xs text-center py-4" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                No hay solicitudes pendientes
+              </p>
+            ) : (
+              items.map(it => (
+                <button
+                  key={it.id}
+                  type="button"
+                  onClick={() => {
+                    navigate(it.to)
+                    setOpen(false)
+                  }}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg transition-colors text-left cursor-pointer"
+                  style={{ color: 'rgba(255,255,255,0.85)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--dark-700)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <span className="text-xs font-medium truncate">{it.label}</span>
+                  <span
+                    className="text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+                    style={{ background: 'var(--gold-dim)', color: 'var(--gold-primary)' }}
+                  >
+                    {it.badge}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function ProfileDropdown({ user, onLogout }) {
   const [open, setOpen] = useState(false)
@@ -179,7 +347,6 @@ function Sidebar({ open, onClose, bannerPosition }) {
           <div className="gold-bar mt-4" style={{ opacity: 0.4 }} />
         </div>
 
-        {/* Banner lateral — solo staff, y solo si esa es la ubicación elegida */}
         {!isClient && bannerPosition === 'sidebar' && (
           <div className="px-3 pt-3">
             <BannerCarousel position="sidebar" />
@@ -255,14 +422,7 @@ function Header({ onMenuToggle, bannerPosition }) {
         )}
       </div>
       <div className="flex items-center gap-2 ml-auto">
-        <button className="relative p-2 rounded-lg transition-colors"
-          style={{ color: 'rgba(255,255,255,0.5)' }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--dark-700)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-          <Bell size={17} />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full border-2"
-            style={{ background: '#EF4444', borderColor: 'var(--dark-900)' }} />
-        </button>
+        <NotificationDropdown />
         <div className="w-px h-5 hidden md:block" style={{ background: 'var(--dark-border)' }} />
         <ProfileDropdown user={user} onLogout={handleLogout} />
       </div>
@@ -274,7 +434,6 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [bannerPosition, setBannerPosition] = useState('footer')
   const { user } = useAuthStore()
-  const isClient = user?.role?.code === 'client'
   const companyId = user?.company?.id || 'a0000000-0000-4000-8000-000000000001'
 
   useEffect(() => {
