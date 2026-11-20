@@ -2,22 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 export default function Advertising() {
-  const [ads, setAds] = useState([]);
-  const [cashRegisters, setCashRegisters] = useState([]);
+  const [banners, setBanners] = useState([]);
+  const [spaces, setSpaces] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('banners'); // 'banners' | 'spaces'
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingAd, setEditingAd] = useState(null);
+  const [editingBanner, setEditingBanner] = useState(null);
+  const [brokenImages, setBrokenImages] = useState({});
 
   const emptyForm = {
-    advertiser: '',
-    space: 'Banner Superior - Header',
-    period: 'Mensual',
-    amount: '12000',
-    currency: 'DOP',
-    status: 'Pendiente de Pago',
-    cash_register_id: '',
+    space_id: '',
+    advertiser_name: '',
+    company_name: '',
+    advertiser_email: '',
+    advertiser_phone: '',
+    image_url: '',
+    link_url: '',
+    alt_text: '',
+    period_type: 'monthly',
     start_date: new Date().toISOString().split('T')[0],
     end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'pending',
+    payment_method: 'transfer',
+    payment_status: 'pending',
+    amount_paid: '12000',
+    notes: '',
   };
 
   const [formData, setFormData] = useState(emptyForm);
@@ -28,156 +37,205 @@ export default function Advertising() {
 
   const loadData = async () => {
     setLoading(true);
-    const [{ data: adsData }, { data: regsData }] = await Promise.all([
-      supabase.from('advertising').select('*').order('created_at', { ascending: false }),
-      supabase.from('cash_registers').select('*').order('code', { ascending: true }),
+    const [{ data: spacesData }, { data: bannersData }] = await Promise.all([
+      supabase.from('ad_spaces').select('*').order('created_at', { ascending: true }),
+      supabase.from('ad_banners').select('*').order('created_at', { ascending: false }),
     ]);
-    setAds(adsData || []);
-    setCashRegisters(regsData || []);
+    setSpaces(spacesData || []);
+    setBanners(bannersData || []);
+    setBrokenImages({});
     setLoading(false);
   };
 
-  const openNew = () => {
-    setEditingAd(null);
-    setFormData(emptyForm);
-    setIsModalOpen(true);
+  const isDirectImageUrl = (url) => {
+    if (!url || typeof url !== 'string') return false;
+    const clean = url.trim();
+    if (!clean.startsWith('http://') && !clean.startsWith('https://')) return false;
+    if (clean.includes('share.google')) return false;
+    return true;
   };
 
-  const openEdit = (ad) => {
-    setEditingAd(ad);
+  const markImageBroken = (key) => {
+    setBrokenImages((prev) => ({ ...prev, [key]: true }));
+  };
+
+  const getSpaceName = (spaceId) => {
+    const found = spaces.find((s) => s.id === spaceId);
+    return found ? (found.name || found.title || found.code || 'Espacio asignado') : 'Banner Principal';
+  };
+
+  const openNew = (preselectedSpaceId = '') => {
+    setEditingBanner(null);
     setFormData({
-      advertiser: ad.advertiser || '',
-      space: ad.space || 'Banner Superior - Header',
-      period: ad.period || 'Mensual',
-      amount: ad.amount ?? '0',
-      currency: ad.currency || 'DOP',
-      status: ad.status || 'Pendiente de Pago',
-      cash_register_id: ad.cash_register_id || '',
-      start_date: ad.start_date || new Date().toISOString().split('T')[0],
-      end_date: ad.end_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      ...emptyForm,
+      space_id: preselectedSpaceId || (spaces[0]?.id || ''),
     });
     setIsModalOpen(true);
   };
 
-  // Dar continuidad / renovar manteniendo el mismo anunciante
-  const openRenew = (ad) => {
-    const baseStart = ad.end_date ? new Date(ad.end_date) : new Date();
-    const nextStart = new Date(baseStart.getTime() + 24 * 60 * 60 * 1000);
-    const nextEnd = new Date(nextStart.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-    setEditingAd(null);
+  const openEdit = (banner) => {
+    setEditingBanner(banner);
     setFormData({
-      advertiser: ad.advertiser,
-      space: ad.space,
-      period: ad.period || 'Mensual',
-      amount: ad.amount ?? '0',
-      currency: ad.currency || 'DOP',
-      status: 'Pendiente de Pago',
-      cash_register_id: ad.cash_register_id || '',
+      space_id: banner.space_id || '',
+      advertiser_name: banner.advertiser_name || '',
+      company_name: banner.company_name || '',
+      advertiser_email: banner.advertiser_email || '',
+      advertiser_phone: banner.advertiser_phone || '',
+      image_url: banner.image_url || '',
+      link_url: banner.link_url || '',
+      alt_text: banner.alt_text || '',
+      period_type: banner.period_type || 'monthly',
+      start_date: banner.start_date || new Date().toISOString().split('T')[0],
+      end_date: banner.end_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      status: banner.status || 'active',
+      payment_method: banner.payment_method || 'transfer',
+      payment_status: banner.payment_status || 'paid',
+      amount_paid: banner.amount_paid ?? '0',
+      notes: banner.notes || '',
+    });
+    setIsModalOpen(true);
+  };
+
+  const openRenew = (banner) => {
+    const days = banner.period_type === 'weekly' ? 7 : 30;
+    const baseDate = banner.end_date ? new Date(banner.end_date + 'T00:00:00') : new Date();
+    const nextStart = new Date(baseDate.getTime() + 24 * 60 * 60 * 1000);
+    const nextEnd = new Date(nextStart.getTime() + days * 24 * 60 * 60 * 1000);
+
+    setEditingBanner(null);
+    setFormData({
+      space_id: banner.space_id || (spaces[0]?.id || ''),
+      advertiser_name: banner.advertiser_name || '',
+      company_name: banner.company_name || '',
+      advertiser_email: banner.advertiser_email || '',
+      advertiser_phone: banner.advertiser_phone || '',
+      image_url: isDirectImageUrl(banner.image_url) ? banner.image_url : '',
+      link_url: banner.link_url || '',
+      alt_text: banner.alt_text || '',
+      period_type: banner.period_type || 'monthly',
       start_date: nextStart.toISOString().split('T')[0],
       end_date: nextEnd.toISOString().split('T')[0],
+      status: 'active',
+      payment_method: banner.payment_method || 'transfer',
+      payment_status: 'paid',
+      amount_paid: banner.amount_paid ?? '0',
+      notes: `Renovación / Continuidad de campaña (${banner.company_name || banner.advertiser_name})`,
     });
     setIsModalOpen(true);
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
+    const cleanedImageUrl = isDirectImageUrl(formData.image_url) ? formData.image_url.trim() : null;
+
     const payload = {
-      ...formData,
-      amount: parseFloat(formData.amount) || 0,
-      cash_register_id: formData.cash_register_id || null,
+      space_id: formData.space_id || null,
+      advertiser_name: formData.advertiser_name,
+      company_name: formData.company_name || null,
+      advertiser_email: formData.advertiser_email || null,
+      advertiser_phone: formData.advertiser_phone || null,
+      image_url: cleanedImageUrl,
+      link_url: formData.link_url?.trim() || null,
+      alt_text: formData.alt_text?.trim() || formData.company_name || formData.advertiser_name,
+      period_type: formData.period_type,
+      start_date: formData.start_date,
+      end_date: formData.end_date,
+      status: formData.status,
+      payment_method: formData.payment_method,
+      payment_status: formData.payment_status,
+      amount_paid: parseFloat(formData.amount_paid) || 0,
+      notes: formData.notes || null,
+      updated_at: new Date().toISOString(),
     };
 
-    if (editingAd) {
-      const { error } = await supabase.from('advertising').update(payload).eq('id', editingAd.id);
-      if (error) return alert('Error al actualizar: ' + error.message);
+    if (editingBanner) {
+      const { error } = await supabase
+        .from('ad_banners')
+        .update(payload)
+        .eq('id', editingBanner.id);
+      if (error) return alert('Error al actualizar anuncio: ' + error.message);
     } else {
-      const { error } = await supabase.from('advertising').insert([payload]);
-      if (error) return alert('Error al crear: ' + error.message);
-
-      if (payload.status === 'Activo' || payload.status === 'Pagado') {
-        await supabase.from('cash_transactions').insert([{
-          cash_register_id: payload.cash_register_id,
-          concept: `Publicidad - ${payload.advertiser} (${payload.space})`,
-          type: 'Ingreso',
-          amount: payload.amount,
-          currency: payload.currency,
-          reference: 'Publicidad',
-          notes: `Período: ${payload.period} (${payload.start_date} a ${payload.end_date})`,
-        }]);
-      }
+      const { error } = await supabase
+        .from('ad_banners')
+        .insert([payload]);
+      if (error) return alert('Error al crear anuncio: ' + error.message);
     }
 
     setIsModalOpen(false);
-    setEditingAd(null);
+    setEditingBanner(null);
     loadData();
   };
 
-  const handleCancelAd = async (ad) => {
-    if (!window.confirm(`¿Cancelar/desactivar el anuncio de "${ad.advertiser}"?`)) return;
-    const { error } = await supabase.from('advertising').update({ status: 'Cancelado' }).eq('id', ad.id);
-    if (error) return alert('Error al cancelar: ' + error.message);
-    loadData();
-  };
+  const handleStatusChange = async (banner, newStatus) => {
+    const label = newStatus === 'cancelled' ? 'cancelar/pausar' : 'activar';
+    if (!window.confirm(`¿Deseas ${label} la publicación de "${banner.advertiser_name}"?`)) return;
 
-  const handleActivateInHeader = async (ad) => {
-    // Pone este anuncio como el más reciente activo y registra pago si aún no estaba pagado
-    const wasPaid = ad.status === 'Activo' || ad.status === 'Pagado';
     const { error } = await supabase
-      .from('advertising')
-      .update({ status: 'Activo', created_at: new Date().toISOString() })
-      .eq('id', ad.id);
-    if (error) return alert('Error al activar: ' + error.message);
+      .from('ad_banners')
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', banner.id);
 
-    if (!wasPaid) {
-      await supabase.from('cash_transactions').insert([{
-        cash_register_id: ad.cash_register_id || null,
-        concept: `Pago de Publicidad - ${ad.advertiser} (${ad.space})`,
-        type: 'Ingreso',
-        amount: parseFloat(ad.amount) || 0,
-        currency: ad.currency || 'DOP',
-        reference: 'Publicidad Activada',
-        notes: `Período: ${ad.period}`,
-      }]);
-    }
+    if (error) return alert('Error al cambiar estado: ' + error.message);
     loadData();
   };
 
-  const topBannerAd = ads.find((a) => a.status === 'Activo' || a.status === 'Pagado');
+  const activeBanner = banners.find((b) => b.status === 'active');
+  const showActiveImg = activeBanner && isDirectImageUrl(activeBanner.image_url) && !brokenImages['top'];
+  const showPreviewImg = isDirectImageUrl(formData.image_url) && !brokenImages['preview'];
 
   return (
     <div className="p-6 space-y-6">
-      {/* Banner superior interactivo */}
-      {topBannerAd && (
-        <div className="rounded-xl border border-amber-400/40 bg-amber-50/90 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-slate-900">
-          <div>
-            <span className="text-xs font-bold uppercase px-2 py-0.5 rounded bg-amber-500 text-white mr-2">
-              En Encabezado
-            </span>
-            <strong className="text-sm">{topBannerAd.advertiser}</strong>
-            <span className="text-xs text-slate-700 ml-2">
-              · {topBannerAd.space} · {topBannerAd.currency} {topBannerAd.amount} ({topBannerAd.start_date} → {topBannerAd.end_date})
-            </span>
+      {/* Banner activo con control rápido para editar, renovar o cancelar */}
+      {activeBanner && (
+        <div className="rounded-xl border border-amber-400/50 bg-gradient-to-r from-slate-900 to-slate-800 text-white p-4 flex flex-wrap items-center justify-between gap-4 shadow">
+          <div className="flex items-center gap-4">
+            {showActiveImg ? (
+              <img
+                src={activeBanner.image_url}
+                alt={activeBanner.alt_text || activeBanner.advertiser_name}
+                className="h-14 w-auto max-w-[220px] object-contain rounded bg-white/10 p-1"
+                onError={() => markImageBroken('top')}
+              />
+            ) : (
+              <div className="h-12 px-3 rounded-lg bg-amber-500/20 border border-amber-400/40 flex items-center text-amber-300 font-bold text-sm">
+                {activeBanner.company_name || activeBanner.advertiser_name}
+              </div>
+            )}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-500 text-white">
+                  Activo en Encabezado
+                </span>
+                <span className="font-semibold text-sm">{activeBanner.advertiser_name}</span>
+                {activeBanner.company_name && (
+                  <span className="text-xs text-slate-300">· {activeBanner.company_name}</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-300 mt-1">
+                {getSpaceName(activeBanner.space_id)} · RD${Number(activeBanner.amount_paid || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} · Vigencia: {activeBanner.start_date} al {activeBanner.end_date}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => openEdit(topBannerAd)}
-              className="px-2.5 py-1 text-xs rounded bg-white border border-slate-300 hover:bg-slate-100"
-              title="Editar anuncio"
+              type="button"
+              onClick={() => openEdit(activeBanner)}
+              className="px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-semibold hover:bg-slate-100"
             >
-              ✏️ Editar
+              ✏️ Editar / Cambiar
             </button>
             <button
-              onClick={() => openRenew(topBannerAd)}
-              className="px-2.5 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
-              title="Dar continuidad / Renovar"
+              type="button"
+              onClick={() => openRenew(activeBanner)}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500"
             >
-              ↻ Renovar
+              ↻ Dar Continuidad
             </button>
             <button
-              onClick={() => handleCancelAd(topBannerAd)}
-              className="px-2.5 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700"
-              title="Cancelar anuncio"
+              type="button"
+              onClick={() => handleStatusChange(activeBanner, 'cancelled')}
+              className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-500"
             >
               ✕ Cancelar
             </button>
@@ -185,141 +243,283 @@ export default function Advertising() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      {/* Encabezado de página */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Publicidad</h1>
-          <p className="text-sm text-slate-500">Editar, dar continuidad, cambiar o cancelar anuncios</p>
+          <h1 className="text-2xl font-bold text-slate-900">Publicidad</h1>
+          <p className="text-sm text-slate-500">Gestión de espacios publicitarios, continuidad y banners activos</p>
         </div>
         <button
-          onClick={openNew}
-          className="px-4 py-2 rounded-lg bg-blue-900 text-white text-sm font-medium hover:bg-blue-800"
+          type="button"
+          onClick={() => openNew()}
+          className="px-4 py-2 rounded-lg bg-blue-950 text-white text-sm font-medium hover:bg-blue-900"
         >
           + Nueva Solicitud
         </button>
       </div>
 
-      <div className="bg-white rounded-xl border overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500">
-            <tr>
-              <th className="p-3">Anunciante</th>
-              <th className="p-3">Espacio</th>
-              <th className="p-3">Monto</th>
-              <th className="p-3">Estado</th>
-              <th className="p-3">Fechas</th>
-              <th className="p-3 text-right">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {loading ? (
-              <tr><td colSpan="6" className="p-6 text-center text-slate-400">Cargando...</td></tr>
-            ) : ads.length === 0 ? (
-              <tr><td colSpan="6" className="p-6 text-center text-slate-400">Sin anuncios</td></tr>
-            ) : (
-              ads.map((ad) => (
-                <tr key={ad.id} className="hover:bg-slate-50">
-                  <td className="p-3 font-medium">{ad.advertiser}</td>
-                  <td className="p-3">{ad.space}</td>
-                  <td className="p-3">{ad.currency} {ad.amount}</td>
-                  <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                      ad.status === 'Activo' || ad.status === 'Pagado'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : ad.status === 'Cancelado'
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-amber-100 text-amber-700'
-                    }`}>
-                      {ad.status}
-                    </span>
-                  </td>
-                  <td className="p-3 text-xs text-slate-600">{ad.start_date} — {ad.end_date}</td>
-                  <td className="p-3">
-                    <div className="flex justify-end gap-1.5">
-                      <button
-                        onClick={() => openEdit(ad)}
-                        className="px-2 py-1 rounded border hover:bg-slate-100 text-xs"
-                        title="Editar / Corregir"
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        onClick={() => openRenew(ad)}
-                        className="px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-medium"
-                        title="Renovar / Continuidad"
-                      >
-                        Renovar
-                      </button>
-                      {ad.status !== 'Activo' && (
-                        <button
-                          onClick={() => handleActivateInHeader(ad)}
-                          className="px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-xs"
-                          title="Poner activo en encabezado"
-                        >
-                          Activar
-                        </button>
-                      )}
-                      {ad.status !== 'Cancelado' && (
-                        <button
-                          onClick={() => handleCancelAd(ad)}
-                          className="px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100 text-xs"
-                          title="Cancelar anuncio"
-                        >
-                          Cancelar
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      {/* Pestañas */}
+      <div className="flex gap-6 border-b text-sm">
+        <button
+          type="button"
+          onClick={() => setActiveTab('banners')}
+          className={`pb-2.5 font-medium border-b-2 transition ${
+            activeTab === 'banners' ? 'border-blue-900 text-blue-900' : 'border-transparent text-slate-500'
+          }`}
+        >
+          Solicitudes y Banners ({banners.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('spaces')}
+          className={`pb-2.5 font-medium border-b-2 transition ${
+            activeTab === 'spaces' ? 'border-blue-900 text-blue-900' : 'border-transparent text-slate-500'
+          }`}
+        >
+          Espacios Disponibles ({spaces.length})
+        </button>
       </div>
 
+      {activeTab === 'banners' ? (
+        <div className="bg-white rounded-xl border overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500">
+              <tr>
+                <th className="p-3.5">Anunciante</th>
+                <th className="p-3.5">Espacio</th>
+                <th className="p-3.5">Período</th>
+                <th className="p-3.5">Monto</th>
+                <th className="p-3.5">Pago</th>
+                <th className="p-3.5">Estado</th>
+                <th className="p-3.5">Fechas</th>
+                <th className="p-3.5 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {loading ? (
+                <tr><td colSpan="8" className="p-6 text-center text-slate-400">Cargando histórico...</td></tr>
+              ) : banners.length === 0 ? (
+                <tr><td colSpan="8" className="p-6 text-center text-slate-400">No hay registros de publicidad</td></tr>
+              ) : (
+                banners.map((b) => (
+                  <tr key={b.id} className="hover:bg-slate-50">
+                    <td className="p-3.5">
+                      <div className="font-semibold text-slate-900">{b.advertiser_name}</div>
+                      <div className="text-xs text-slate-500">{b.company_name || b.advertiser_email}</div>
+                    </td>
+                    <td className="p-3.5 text-slate-700">{getSpaceName(b.space_id)}</td>
+                    <td className="p-3.5">
+                      <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-xs font-semibold uppercase">
+                        {b.period_type === 'monthly' ? 'MENSUAL' : b.period_type === 'weekly' ? 'SEMANAL' : b.period_type}
+                      </span>
+                    </td>
+                    <td className="p-3.5 font-medium">
+                      RD${Number(b.amount_paid || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="p-3.5">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase ${
+                        b.payment_status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {b.payment_status === 'paid' ? 'PAGADO' : 'PENDIENTE'}
+                      </span>
+                    </td>
+                    <td className="p-3.5">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase ${
+                        b.status === 'active'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : b.status === 'cancelled'
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {b.status === 'active' ? 'ACTIVO' : b.status === 'cancelled' ? 'CANCELADO' : b.status}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-xs text-slate-600">{b.start_date} — {b.end_date}</td>
+                    <td className="p-3.5">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(b)}
+                          className="p-1.5 rounded border border-slate-200 hover:bg-slate-100 text-slate-700"
+                          title="Editar / Corregir anuncio"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openRenew(b)}
+                          className="px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-medium"
+                          title="Renovar / Dar continuidad"
+                        >
+                          Renovar
+                        </button>
+                        {b.status !== 'active' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleStatusChange(b, 'active')}
+                            className="px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-xs"
+                          >
+                            Activar
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleStatusChange(b, 'cancelled')}
+                            className="px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100 text-xs"
+                          >
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-4">
+          {spaces.map((sp) => (
+            <div key={sp.id} className="bg-white rounded-xl border p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-slate-900">{sp.name || sp.title}</h3>
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                  DISPONIBLE
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">{sp.description || sp.dimensions}</p>
+              <button
+                type="button"
+                onClick={() => openNew(sp.id)}
+                className="w-full py-2 rounded-lg bg-blue-950 text-white text-xs font-semibold hover:bg-blue-900"
+              >
+                Solicitar este espacio
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modal de Edición / Creación / Renovación */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="text-lg font-bold">
-              {editingAd ? 'Editar / Corregir Anuncio' : 'Nueva Solicitud / Continuidad'}
+          <div className="bg-white rounded-xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-bold text-slate-900">
+              {editingBanner ? 'Editar / Corregir Publicación' : 'Nueva Solicitud / Continuidad'}
             </h2>
             <form onSubmit={handleSave} className="space-y-3 text-sm">
-              <div>
-                <label className="block text-xs text-slate-600 mb-1">Anunciante</label>
-                <input
-                  required
-                  value={formData.advertiser}
-                  onChange={(e) => setFormData({ ...formData, advertiser: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-600 mb-1">Monto</label>
+                  <label className="block text-xs text-slate-600 mb-1">Nombre del Anunciante *</label>
                   <input
-                    type="number"
-                    step="0.01"
                     required
-                    value={formData.amount}
-                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    value={formData.advertiser_name}
+                    onChange={(e) => setFormData({ ...formData, advertiser_name: e.target.value })}
                     className="w-full border rounded-lg px-3 py-2"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-600 mb-1">Moneda</label>
+                  <label className="block text-xs text-slate-600 mb-1">Empresa / Marca</label>
+                  <input
+                    value={formData.company_name}
+                    onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Correo</label>
+                  <input
+                    type="email"
+                    value={formData.advertiser_email}
+                    onChange={(e) => setFormData({ ...formData, advertiser_email: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Teléfono</label>
+                  <input
+                    value={formData.advertiser_phone}
+                    onChange={(e) => setFormData({ ...formData, advertiser_phone: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-600 mb-1">
+                  URL directa de imagen (.png / .jpg / .webp — evitar links de share.google)
+                </label>
+                <input
+                  value={formData.image_url}
+                  onChange={(e) => {
+                    setBrokenImages((prev) => ({ ...prev, preview: false }));
+                    setFormData({ ...formData, image_url: e.target.value });
+                  }}
+                  placeholder="https://...imagen.png"
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+                {showPreviewImg && (
+                  <img
+                    src={formData.image_url}
+                    alt="Vista previa"
+                    className="mt-2 h-16 object-contain border rounded p-1 bg-slate-50"
+                    onError={() => markImageBroken('preview')}
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-600 mb-1">Enlace destino al hacer clic (URL)</label>
+                <input
+                  value={formData.link_url}
+                  onChange={(e) => setFormData({ ...formData, link_url: e.target.value })}
+                  placeholder="https://airstayrd.com"
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Período</label>
                   <select
-                    value={formData.currency}
-                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                    value={formData.period_type}
+                    onChange={(e) => setFormData({ ...formData, period_type: e.target.value })}
                     className="w-full border rounded-lg px-3 py-2"
                   >
-                    <option value="DOP">DOP</option>
-                    <option value="USD">USD</option>
-                    <option value="BRL">BRL</option>
+                    <option value="weekly">Semanal</option>
+                    <option value="monthly">Mensual</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Monto (RD$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.amount_paid}
+                    onChange={(e) => setFormData({ ...formData, amount_paid: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Pago</label>
+                  <select
+                    value={formData.payment_status}
+                    onChange={(e) => setFormData({ ...formData, payment_status: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2"
+                  >
+                    <option value="paid">Pagado</option>
+                    <option value="pending">Pendiente</option>
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-600 mb-1">Desde</label>
+                  <label className="block text-xs text-slate-600 mb-1">Inicio</label>
                   <input
                     type="date"
                     value={formData.start_date}
@@ -328,7 +528,7 @@ export default function Advertising() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-600 mb-1">Hasta</label>
+                  <label className="block text-xs text-slate-600 mb-1">Vencimiento</label>
                   <input
                     type="date"
                     value={formData.end_date}
@@ -336,8 +536,6 @@ export default function Advertising() {
                     className="w-full border rounded-lg px-3 py-2"
                   />
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-slate-600 mb-1">Estado</label>
                   <select
@@ -345,32 +543,36 @@ export default function Advertising() {
                     onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                     className="w-full border rounded-lg px-3 py-2"
                   >
-                    <option value="Pendiente de Pago">Pendiente de Pago</option>
-                    <option value="Activo">Activo</option>
-                    <option value="Pagado">Pagado</option>
-                    <option value="Cancelado">Cancelado</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-600 mb-1">Caja</label>
-                  <select
-                    value={formData.cash_register_id}
-                    onChange={(e) => setFormData({ ...formData, cash_register_id: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2"
-                  >
-                    <option value="">Sin caja</option>
-                    {cashRegisters.map((r) => (
-                      <option key={r.id} value={r.id}>{r.code} · {r.currency}</option>
-                    ))}
+                    <option value="active">Activo</option>
+                    <option value="pending">Pendiente</option>
+                    <option value="cancelled">Cancelado</option>
                   </select>
                 </div>
               </div>
-              <div className="flex justify-end gap-2 pt-3">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-lg border">
-                  Cancelar
+
+              <div>
+                <label className="block text-xs text-slate-600 mb-1">Notas</label>
+                <textarea
+                  rows="2"
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 rounded-lg border text-slate-700"
+                >
+                  Cerrar
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-lg bg-blue-900 text-white font-medium">
-                  Guardar
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-blue-950 text-white font-semibold"
+                >
+                  Guardar Cambios
                 </button>
               </div>
             </form>
