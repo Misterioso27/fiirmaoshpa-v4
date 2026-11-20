@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Eye, EyeOff, Loader2, UserPlus, ArrowLeft, Mail, CheckCircle2 } from 'lucide-react'
+import { Building2, Eye, EyeOff, Loader2, UserPlus, ArrowLeft, Mail, CheckCircle2, Sparkles } from 'lucide-react'
 import useAuthStore from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 import LoginIntentCard from '@/components/LoginIntentCard'
@@ -14,6 +14,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [show, setShow] = useState(false)
   const [error, setError] = useState('')
+  const [selectedIntentLabel, setSelectedIntentLabel] = useState('')
   const { login, loading } = useAuthStore()
   const navigate = useNavigate()
 
@@ -74,6 +75,16 @@ export default function Login() {
         .select('*', { count: 'exact', head: true }).eq('company_id', COMPANY_ID)
       const clientCode = `HPA-C-${String((count || 0) + 1).padStart(4, '0')}`
 
+      let pendingPayload = null
+      try {
+        const rawIntent = sessionStorage.getItem('fiirmaoshpa_pending_intent')
+        if (rawIntent) pendingPayload = JSON.parse(rawIntent)
+      } catch (_) {}
+
+      const notesText = pendingPayload
+        ? `Solicitud inicial desde registro: ${pendingPayload.title} (${pendingPayload.formType})`
+        : null
+
       const { error: clientError } = await supabase.from('clients').insert({
         company_id: COMPANY_ID, branch_id: BRANCH_ID,
         client_code: clientCode, type: 'person', status: 'prospect',
@@ -82,6 +93,7 @@ export default function Login() {
         address: regForm.address, city: regForm.city,
         nationality: 'DO', kyc_level: 0, risk_level: 'medium',
         user_id: authData.user?.id || null,
+        notes: notesText,
       })
       if (clientError) throw new Error('Cuenta creada, pero hubo un problema registrando tu perfil: ' + clientError.message)
 
@@ -129,6 +141,12 @@ export default function Login() {
         {mode === 'login' && (
           <div className="max-w-sm mx-auto bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
             <h2 className="text-white font-semibold text-base mb-5">Iniciar sesión</h2>
+            {selectedIntentLabel && (
+              <div className="mb-4 px-3 py-2 rounded-lg bg-amber-500/15 border border-amber-400/30 text-amber-200 text-xs flex items-center gap-2">
+                <Sparkles size={14} className="shrink-0 text-amber-300" />
+                <span>Solicitud seleccionada: <strong>{selectedIntentLabel}</strong></span>
+              </div>
+            )}
             {error && (
               <div className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/30 text-red-200 text-sm">
                 {error}
@@ -163,9 +181,9 @@ export default function Login() {
                 className="block w-full text-xs text-white/40 hover:text-white/70 transition-colors">
                 ¿Olvidaste tu contraseña?
               </button>
-              <button type="button" onClick={() => { setMode('register'); setRegError('') }}
+              <button type="button" onClick={() => { setMode('choose'); setRegError('') }}
                 className="inline-flex items-center gap-1 text-xs text-hpa-gold hover:text-hpa-gold/80 font-semibold transition-colors">
-                <UserPlus size={13} /> Crear cuenta nueva
+                <UserPlus size={13} /> Crear cuenta / Elegir solicitud
               </button>
             </div>
           </div>
@@ -218,11 +236,16 @@ export default function Login() {
         {/* ─── REGISTRO ──────────────────────────────────────── */}
         {mode === 'register' && (
           <div className="max-w-sm mx-auto bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
-            <button type="button" onClick={() => { setMode('login'); setRegError('') }}
+            <button type="button" onClick={() => { setMode('choose'); setRegError('') }}
               className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 mb-4">
-              <ArrowLeft size={13} /> Volver a iniciar sesión
+              <ArrowLeft size={13} /> Cambiar opción de solicitud
             </button>
-            <h2 className="text-white font-semibold text-base mb-5">Crear cuenta</h2>
+            <h2 className="text-white font-semibold text-base mb-1">Crear cuenta</h2>
+            {selectedIntentLabel && (
+              <p className="text-amber-300 text-xs mb-4">
+                Solicitud elegida: <strong>{selectedIntentLabel}</strong>
+              </p>
+            )}
             {regError && (
               <div className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/30 text-red-200 text-sm">
                 {regError}
@@ -279,15 +302,18 @@ export default function Login() {
           </div>
         )}
 
-        {/* ─── ELEGIR DESTINO ────────────────────────────────── */}
+        {/* ─── ELEGIR SOLICITUD / DESTINO ────────────────────── */}
         {mode === 'choose' && (
           <div className="space-y-3">
             <div className="flex justify-center">
               <LoginIntentCard
                 requireLoginFirst={true}
-                onSelectIntent={() => {
+                headerTitle={regForm.email ? '¡Cuenta creada!' : '¿Qué deseas solicitar?'}
+                headerSubtitle="Elige el servicio o solicitud antes de continuar"
+                onSelectIntent={(payload) => {
+                  setSelectedIntentLabel(payload.title)
                   setEmail(regForm.email || '')
-                  setMode('login')
+                  setMode('register')
                 }}
               />
             </div>
@@ -297,7 +323,7 @@ export default function Login() {
                 onClick={() => setMode('login')}
                 className="text-xs text-white/60 hover:text-white underline cursor-pointer"
               >
-                Ir a iniciar sesión directamente
+                Volver a iniciar sesión
               </button>
             </div>
           </div>
