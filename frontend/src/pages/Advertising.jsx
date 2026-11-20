@@ -193,6 +193,30 @@ export default function Advertising() {
     loadData();
   };
 
+  const handleDelete = async (banner) => {
+    if (!banner?.id) return;
+    const ok = window.confirm(
+      `¿Eliminar definitivamente la publicación de "${banner.advertiser_name}" (${banner.start_date} al ${banner.end_date})? Esta acción borrará el registro sin dejar rastro.`
+    );
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from('ad_banners')
+      .delete()
+      .eq('id', banner.id);
+
+    if (error) {
+      return alert('Error al eliminar anuncio: ' + error.message);
+    }
+
+    if (editingBanner?.id === banner.id) {
+      setIsModalOpen(false);
+      setEditingBanner(null);
+    }
+
+    loadData();
+  };
+
   const activeBanner = banners.find((b) => b.status === 'active');
   const showActiveImg = activeBanner && isDirectImageUrl(activeBanner.image_url) && !brokenImages['top'];
   const showPreviewImg = isDirectImageUrl(formData.image_url) && !brokenImages['preview'];
@@ -379,11 +403,19 @@ export default function Advertising() {
                           <button
                             type="button"
                             onClick={() => handleStatusChange(b, 'paused')}
-                            className="px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100 text-xs"
+                            className="px-2 py-1 rounded bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs"
                           >
                             Pausar
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(b)}
+                          className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs font-medium"
+                          title="Eliminar registro definitivamente"
+                        >
+                          Eliminar
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -576,20 +608,33 @@ export default function Advertising() {
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border text-slate-700"
-                >
-                  Cerrar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-950 text-white font-semibold"
-                >
-                  Guardar Cambios
-                </button>
+              <div className="flex items-center justify-between gap-2 pt-3 border-t">
+                <div>
+                  {editingBanner && (
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(editingBanner)}
+                      className="px-4 py-2 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700"
+                    >
+                      Eliminar Registro
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 rounded-lg border text-slate-700"
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-lg bg-blue-950 text-white font-semibold"
+                  >
+                    Guardar Cambios
+                  </button>
+                </div>
               </div>
             </form>
           </div>
