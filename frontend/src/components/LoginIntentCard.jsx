@@ -1,41 +1,61 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CreditCard, TrendingUp, Megaphone, MessageSquarePlus, ArrowRight } from 'lucide-react';
+import {
+  CreditCard,
+  TrendingUp,
+  Megaphone,
+  Briefcase,
+  MoreHorizontal,
+  ArrowRight,
+} from 'lucide-react';
 
 const STORAGE_KEY = 'fiirmaoshpa_pending_intent';
 
-const INTENT_OPTIONS = [
+export const DEFAULT_INTENT_OPTIONS = [
   {
     id: 'loan',
-    title: 'Solicitar préstamo',
-    subtitle: 'Crédito personal o comercial',
+    title: 'Préstamos',
+    subtitle: 'Solicitar crédito o micropréstamo',
     icon: CreditCard,
     targetRoute: '/loans',
     formType: 'loan_application',
+    requestedRole: 'client',
   },
   {
     id: 'investment',
-    title: 'Invertir',
-    subtitle: 'Planes y rendimientos',
+    title: 'Inversiones',
+    subtitle: 'Planes y rendimientos de inversión',
     icon: TrendingUp,
     targetRoute: '/investments',
     formType: 'investment_request',
+    requestedRole: 'client',
   },
   {
     id: 'advertising',
-    title: 'Publicidad / Banner',
-    subtitle: 'Promociona tu marca o negocio',
+    title: 'Publicidad',
+    subtitle: 'Publicar banner o anuncio comercial',
     icon: Megaphone,
     targetRoute: '/advertising',
     formType: 'ad_banner_request',
+    requestedRole: 'client',
+  },
+  {
+    id: 'employee',
+    title: 'Empleado',
+    subtitle: 'Solicitud de puesto o cargo',
+    icon: Briefcase,
+    targetRoute: '/dashboard',
+    formType: 'employee_application',
+    requestedRole: 'pending_staff',
   },
   {
     id: 'other',
-    title: 'Otra solicitud',
-    subtitle: 'Complementar al entrar',
-    icon: MessageSquarePlus,
+    title: 'Otros',
+    subtitle: 'Otras solicitudes o servicios',
+    icon: MoreHorizontal,
     targetRoute: '/dashboard',
-    formType: 'general_request',
+    formType: 'other_request',
+    requestedRole: 'client',
   },
 ];
 
@@ -65,14 +85,24 @@ export function usePendingIntent() {
   return { pendingIntent, clearPendingIntent };
 }
 
-export default function LoginIntentCard({ onSelectIntent, requireLoginFirst = true }) {
+export default function LoginIntentCard({
+  onSelectIntent,
+  requireLoginFirst = true,
+  extraOptions = [],
+  headerTitle = '¡Cuenta creada!',
+  headerSubtitle = '¿Qué deseas solicitar o hacer?',
+}) {
   const navigate = useNavigate();
+
+  const options = [...DEFAULT_INTENT_OPTIONS, ...extraOptions];
 
   const handleChoose = (option) => {
     const payload = {
       intent: option.id,
-      formType: option.formType,
-      targetRoute: option.targetRoute,
+      title: option.title,
+      formType: option.formType || 'other_request',
+      requestedRole: option.requestedRole || 'client',
+      targetRoute: option.targetRoute || '/dashboard',
       selectedAt: new Date().toISOString(),
     };
 
@@ -87,7 +117,7 @@ export default function LoginIntentCard({ onSelectIntent, requireLoginFirst = tr
     }
 
     if (!requireLoginFirst) {
-      navigate(`${option.targetRoute}?intent=${option.id}`);
+      navigate(`${payload.targetRoute}?intent=${encodeURIComponent(payload.intent)}`);
     }
   };
 
@@ -100,19 +130,22 @@ export default function LoginIntentCard({ onSelectIntent, requireLoginFirst = tr
       }}
     >
       <div className="text-center mb-5">
-        <h2 className="text-lg font-bold text-white">¡Cuenta creada!</h2>
-        <p className="text-sm text-zinc-400 mt-1">¿Qué deseas hacer?</p>
+        <h2 className="text-lg font-bold text-white">{headerTitle}</h2>
+        <p className="text-sm text-zinc-400 mt-1">{headerSubtitle}</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {INTENT_OPTIONS.map((opt) => {
-          const Icon = opt.icon;
+        {options.map((opt, idx) => {
+          const Icon = opt.icon || MoreHorizontal;
+          const isLastOdd = options.length % 2 === 1 && idx === options.length - 1;
           return (
             <button
-              key={opt.id}
+              key={opt.id || `${opt.title}-${idx}`}
               type="button"
               onClick={() => handleChoose(opt)}
-              className="group flex flex-col justify-between text-left p-3.5 rounded-xl border transition-all cursor-pointer"
+              className={`group flex flex-col justify-between text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
+                isLastOdd ? 'sm:col-span-2' : ''
+              }`}
               style={{
                 background: 'rgba(39, 39, 42, 0.7)',
                 borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -152,7 +185,7 @@ export default function LoginIntentCard({ onSelectIntent, requireLoginFirst = tr
       </div>
 
       <p className="text-[11px] text-zinc-400 text-center mt-5 leading-relaxed">
-        Inicia sesión con tu correo y contraseña para continuar; al entrar podrás complementar o ajustar tu solicitud exacta.
+        Inicia sesión con tu correo y contraseña para continuar; tu solicitud quedará registrada para complementar o ser confirmada por administración.
       </p>
     </div>
   );
