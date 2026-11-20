@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
+const VALID_BANNER_STATUSES = [
+  { value: 'pending', label: 'Pendiente' },
+  { value: 'approved', label: 'Aprobado' },
+  { value: 'active', label: 'Activo' },
+  { value: 'paused', label: 'Pausado / Cancelado' },
+  { value: 'expired', label: 'Vencido' },
+  { value: 'rejected', label: 'Rechazado' },
+];
+
 export default function Advertising() {
   const [banners, setBanners] = useState([]);
   const [spaces, setSpaces] = useState([]);
@@ -62,6 +71,11 @@ export default function Advertising() {
   const getSpaceName = (spaceId) => {
     const found = spaces.find((s) => s.id === spaceId);
     return found ? (found.name || found.title || found.code || 'Espacio asignado') : 'Banner Principal';
+  };
+
+  const getStatusLabel = (status) => {
+    const found = VALID_BANNER_STATUSES.find((s) => s.value === status);
+    return found ? found.label.toUpperCase() : String(status || '').toUpperCase();
   };
 
   const openNew = (preselectedSpaceId = '') => {
@@ -167,7 +181,7 @@ export default function Advertising() {
   };
 
   const handleStatusChange = async (banner, newStatus) => {
-    const label = newStatus === 'cancelled' ? 'cancelar/pausar' : 'activar';
+    const label = newStatus === 'paused' ? 'pausar/cancelar' : 'activar';
     if (!window.confirm(`¿Deseas ${label} la publicación de "${banner.advertiser_name}"?`)) return;
 
     const { error } = await supabase
@@ -185,7 +199,7 @@ export default function Advertising() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Banner activo con control rápido para editar, renovar o cancelar */}
+      {/* Banner activo con control rápido para editar, renovar o pausar */}
       {activeBanner && (
         <div className="rounded-xl border border-amber-400/50 bg-gradient-to-r from-slate-900 to-slate-800 text-white p-4 flex flex-wrap items-center justify-between gap-4 shadow">
           <div className="flex items-center gap-4">
@@ -234,10 +248,10 @@ export default function Advertising() {
             </button>
             <button
               type="button"
-              onClick={() => handleStatusChange(activeBanner, 'cancelled')}
+              onClick={() => handleStatusChange(activeBanner, 'paused')}
               className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-500"
             >
-              ✕ Cancelar
+              ✕ Pausar / Cancelar
             </button>
           </div>
         </div>
@@ -327,11 +341,11 @@ export default function Advertising() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-semibold uppercase ${
                         b.status === 'active'
                           ? 'bg-emerald-100 text-emerald-700'
-                          : b.status === 'cancelled'
+                          : ['paused', 'rejected', 'expired'].includes(b.status)
                           ? 'bg-red-100 text-red-700'
                           : 'bg-amber-100 text-amber-700'
                       }`}>
-                        {b.status === 'active' ? 'ACTIVO' : b.status === 'cancelled' ? 'CANCELADO' : b.status}
+                        {getStatusLabel(b.status)}
                       </span>
                     </td>
                     <td className="p-3.5 text-xs text-slate-600">{b.start_date} — {b.end_date}</td>
@@ -364,10 +378,10 @@ export default function Advertising() {
                         ) : (
                           <button
                             type="button"
-                            onClick={() => handleStatusChange(b, 'cancelled')}
+                            onClick={() => handleStatusChange(b, 'paused')}
                             className="px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100 text-xs"
                           >
-                            Cancelar
+                            Pausar
                           </button>
                         )}
                       </div>
@@ -543,9 +557,11 @@ export default function Advertising() {
                     onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                     className="w-full border rounded-lg px-3 py-2"
                   >
-                    <option value="active">Activo</option>
-                    <option value="pending">Pendiente</option>
-                    <option value="cancelled">Cancelado</option>
+                    {VALID_BANNER_STATUSES.map((st) => (
+                      <option key={st.value} value={st.value}>
+                        {st.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
