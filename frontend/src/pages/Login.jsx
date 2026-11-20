@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Eye, EyeOff, Loader2, UserPlus, ArrowLeft, CreditCard, TrendingUp, Mail, CheckCircle2 } from 'lucide-react'
+import { Building2, Eye, EyeOff, Loader2, UserPlus, ArrowLeft, Mail, CheckCircle2 } from 'lucide-react'
 import useAuthStore from '@/store/auth'
 import { supabase } from '@/lib/supabase'
+import LoginIntentCard from '@/components/LoginIntentCard'
 
 const COMPANY_ID = 'a0000000-0000-4000-8000-000000000001'
 const BRANCH_ID  = 'b0000000-0000-4000-8000-000000000001'
@@ -37,7 +38,17 @@ export default function Login() {
     setError('')
     try {
       await login(email, password)
-      navigate('/dashboard')
+      let target = '/dashboard'
+      try {
+        const raw = sessionStorage.getItem('fiirmaoshpa_pending_intent')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed?.targetRoute) target = parsed.targetRoute
+        }
+      } catch (err) {
+        console.error('No se pudo leer intención pendiente al iniciar sesión:', err)
+      }
+      navigate(target)
     } catch (err) {
       setError(err.message)
     }
@@ -98,17 +109,13 @@ export default function Login() {
     setForgotSaving(false)
   }
 
-  function goTo(destino) {
-    navigate(destino)
-  }
-
   return (
     <div className="min-h-screen gradient-hpa flex items-center justify-center p-4">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-white/5 blur-3xl" />
         <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-hpa-gold/10 blur-3xl" />
       </div>
-      <div className="w-full max-w-sm relative z-10">
+      <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-hpa-gold shadow-glow-gold mb-4">
             <Building2 size={28} className="text-hpa-900" />
@@ -120,7 +127,7 @@ export default function Login() {
 
         {/* ─── LOGIN ─────────────────────────────────────────── */}
         {mode === 'login' && (
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
+          <div className="max-w-sm mx-auto bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
             <h2 className="text-white font-semibold text-base mb-5">Iniciar sesión</h2>
             {error && (
               <div className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/30 text-red-200 text-sm">
@@ -166,7 +173,7 @@ export default function Login() {
 
         {/* ─── RECUPERAR CONTRASEÑA ──────────────────────────── */}
         {mode === 'forgot' && (
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
+          <div className="max-w-sm mx-auto bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
             <button type="button" onClick={() => setMode('login')}
               className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 mb-4">
               <ArrowLeft size={13} /> Volver a iniciar sesión
@@ -210,7 +217,7 @@ export default function Login() {
 
         {/* ─── REGISTRO ──────────────────────────────────────── */}
         {mode === 'register' && (
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
+          <div className="max-w-sm mx-auto bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg">
             <button type="button" onClick={() => { setMode('login'); setRegError('') }}
               className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 mb-4">
               <ArrowLeft size={13} /> Volver a iniciar sesión
@@ -274,24 +281,25 @@ export default function Login() {
 
         {/* ─── ELEGIR DESTINO ────────────────────────────────── */}
         {mode === 'choose' && (
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-card-lg text-center">
-            <h2 className="text-white font-semibold text-base mb-2">¡Cuenta creada!</h2>
-            <p className="text-white/60 text-sm mb-6">¿Qué deseas hacer?</p>
-            <div className="grid grid-cols-2 gap-3">
-              <button type="button" onClick={() => goTo('/loans')}
-                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 border border-white/20 hover:bg-white/20 hover:border-hpa-gold/50 transition-all">
-                <CreditCard size={22} className="text-hpa-gold" />
-                <span className="text-white text-sm font-semibold">Solicitar préstamo</span>
-              </button>
-              <button type="button" onClick={() => goTo('/investments')}
-                className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 border border-white/20 hover:bg-white/20 hover:border-hpa-gold/50 transition-all">
-                <TrendingUp size={22} className="text-hpa-gold" />
-                <span className="text-white text-sm font-semibold">Invertir</span>
+          <div className="space-y-3">
+            <div className="flex justify-center">
+              <LoginIntentCard
+                requireLoginFirst={true}
+                onSelectIntent={() => {
+                  setEmail(regForm.email || '')
+                  setMode('login')
+                }}
+              />
+            </div>
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => setMode('login')}
+                className="text-xs text-white/60 hover:text-white underline cursor-pointer"
+              >
+                Ir a iniciar sesión directamente
               </button>
             </div>
-            <p className="text-white/40 text-2xs mt-5">
-              Inicia sesión con tu correo y contraseña para continuar, y busca tu nombre en el formulario correspondiente.
-            </p>
           </div>
         )}
 
