@@ -22,7 +22,7 @@ const NAV = [
   { to: '/cash',        icon: Landmark,        label: 'Caja',           module: 'cash',        staffOnly: true },
   { to: '/employees',   icon: Briefcase,       label: 'Empleados',      module: 'employees',   staffOnly: true },
   { to: '/import',      icon: UploadIcon,      label: 'Importar',       module: 'loans',       staffOnly: true },
-  { to: '/advertising', icon: Megaphone,       label: 'Publicidad',     module: 'advertising', staffOnly: true },
+  { to: '/advertising', icon: Megaphone,       label: 'Publicidad',     module: 'advertising'                },
   { to: '/ai',          icon: Bot,             label: 'FIIRMAOSHPA AI', module: 'ai',          staffOnly: true },
   { to: '/reports',     icon: BarChart3,       label: 'Reportes',       module: 'reports',     staffOnly: true },
   { to: '/audit',       icon: Shield,          label: 'Auditoría',      module: 'audit',       staffOnly: true },
@@ -41,11 +41,18 @@ function NotificationDropdown() {
     const list = []
     try {
       const [
+        { data: prospectClients },
         { data: pendingAds },
         { data: pendingLoans },
         { data: pendingApprovals },
         { data: overdueLoans },
       ] = await Promise.all([
+        supabase
+          .from('clients')
+          .select('id, client_code, first_name, last_name, status')
+          .in('status', ['prospect', 'Prospecto'])
+          .order('created_at', { ascending: false })
+          .limit(8),
         supabase
           .from('ad_banners')
           .select('id, advertiser_name, company_name, status')
@@ -67,6 +74,16 @@ function NotificationDropdown() {
           .in('status', ['overdue', 'defaulted', 'mora', 'En mora'])
           .limit(5),
       ])
+
+      ;(prospectClients || []).forEach(c => {
+        const fullName = `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.client_code || 'Cliente'
+        list.push({
+          id: `prospect-${c.id}`,
+          badge: 'Prospecto',
+          label: `${fullName}${c.client_code ? ` (${c.client_code})` : ''}`,
+          to: '/clients',
+        })
+      })
 
       ;(pendingAds || []).forEach(a => list.push({
         id: `ad-${a.id}`,
@@ -138,7 +155,7 @@ function NotificationDropdown() {
       {open && (
         <div
           className="absolute right-0 top-full mt-2 rounded-xl shadow-2xl z-50 overflow-hidden border"
-          style={{ background: 'var(--dark-800)', borderColor: 'var(--dark-border)', width: '19rem' }}
+          style={{ background: 'var(--dark-800)', borderColor: 'var(--dark-border)', width: '20rem' }}
         >
           <div
             className="px-4 py-2.5 flex items-center justify-between"
