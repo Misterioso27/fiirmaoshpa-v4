@@ -32,11 +32,18 @@ export default function AppShell({
 
     try {
       const [
+        { data: prospectClients },
         { data: pendingAds },
         { data: pendingLoans },
         { data: pendingApprovals },
         { data: overdueLoans },
       ] = await Promise.all([
+        supabase
+          .from('clients')
+          .select('id, client_code, first_name, last_name, status')
+          .in('status', ['prospect', 'Prospecto'])
+          .order('created_at', { ascending: false })
+          .limit(8),
         supabase
           .from('ad_banners')
           .select('id, advertiser_name, company_name, status')
@@ -58,6 +65,17 @@ export default function AppShell({
           .in('status', ['overdue', 'defaulted', 'mora', 'En mora'])
           .limit(5),
       ]);
+
+      (prospectClients || []).forEach((c) => {
+        const fullName =
+          `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.client_code || 'Cliente';
+        list.push({
+          id: `prospect-${c.id}`,
+          badge: 'Prospecto',
+          text: `${fullName}${c.client_code ? ` (${c.client_code})` : ''}`,
+          route: '/clients',
+        });
+      });
 
       (pendingAds || []).forEach((a) =>
         list.push({
